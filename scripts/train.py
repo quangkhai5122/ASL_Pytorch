@@ -141,7 +141,7 @@ def train_epoch(model, dataloader, criterion, optimizer, device, epoch_num, num_
         running_acc += accuracy(preds, labels).item()
         running_top5_acc += top_k_accuracy(outputs, labels, k=5)
 
-        # Cập nhật TQDM postfix (Hiển thị trung bình hiện tại để mượt hơn)
+        # Cập nhật TQDM postfix
         avg_loss = running_loss / (i + 1)
         avg_acc = running_acc / (i + 1)
         progress_bar.set_postfix(loss=f'{avg_loss:.4f}', acc=f'{avg_acc:.4f}')
@@ -172,7 +172,6 @@ def validate_epoch(model, dataloader, criterion, device, epoch_num, num_epochs):
             outputs = model(frames, non_empty_idxs)
             loss = criterion(outputs, labels)
 
-            # Metrics
             running_loss += loss.item()
             _, preds = torch.max(outputs, 1)
             running_acc += accuracy(preds, labels).item()
@@ -203,22 +202,18 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
 
     # 2. Initialize KFold (Deterministic splits)
     kfold = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
-    # Tính toán tất cả các splits trước để đảm bảo nhất quán khi resume
     all_splits = list(kfold.split(dataset.df, dataset.labels))
     
     # 3. Setup Directories và Checkpoint Path
     save_dir_abs = resolve_save_dir(save_dir)
-    # Đường dẫn checkpoint trung tâm
     CV_CHECKPOINT_PATH = os.path.join(save_dir_abs, "cv_checkpoint_latest.pth")
     
     # Khởi tạo trạng thái mặc định
     start_fold = 0
     cv_results = []
-    # Tên thư mục TensorBoard mặc định (timestamped)
     run_name = f"ASL_CV_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     # 4. Resume Logic (Global CV State)
-    # Biến cờ để theo dõi xem có đang thực sự resume từ một trạng thái cũ hay không
     is_resuming = False 
     if resume and os.path.exists(CV_CHECKPOINT_PATH):
         print(f"\n[INFO] Found CV checkpoint. Attempting to resume.")
@@ -242,7 +237,7 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
     if not is_resuming:
         print("\n[INFO] Starting Cross-Validation from scratch.")
 
-    # Setup TensorBoard Directory (sử dụng run_name mới hoặc đã khôi phục)
+    # Setup TensorBoard Directory 
     tb_base_dir = os.path.join(tensorboard_dir, run_name)
     os.makedirs(tb_base_dir, exist_ok=True)
     print(f"\nTensorBoard logs: {tb_base_dir}\nRun: tensorboard --logdir={tensorboard_dir}\n")
@@ -277,23 +272,18 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         start_epoch = 0
         best_val_acc_in_fold = 0.0
 
-        # Kiểm tra nếu chúng ta đang resume đúng Fold bị gián đoạn
-        # Cần kiểm tra resume=True lại và sự tồn tại của checkpoint vì trạng thái có thể thay đổi nếu lần load đầu tiên thất bại.
         if resume and os.path.exists(CV_CHECKPOINT_PATH):
-             # Tải lại checkpoint, lần này cập nhật model/optimizer/scheduler mới khởi tạo
+             # Tải lại checkpoint
              checkpoint = load_checkpoint(CV_CHECKPOINT_PATH, DEVICE, model, optimizer, scheduler)
-             
-             # Xác minh rằng chúng ta đang tải đúng dữ liệu của fold hiện tại (tránh tải weights của fold trước)
+
              if checkpoint and checkpoint.get('current_fold_index') == fold_idx:
                 print("[INFO] Resuming training within this fold...")
                 start_epoch = checkpoint.get('next_epoch_index', 0)
                 best_val_acc_in_fold = checkpoint.get('best_val_acc_in_fold', 0.0)
                 print(f"[INFO] Resuming at Epoch {start_epoch + 1}. Best Val Acc so far: {best_val_acc_in_fold:.4f}")
-                
-                # Xử lý trường hợp bị crash ngay sau khi epoch cuối cùng hoàn thành nhưng trước khi logic chuyển fold chạy.
+
                 if start_epoch >= N_EPOCHS_PER_FOLD:
                     print("[INFO] This fold was already completed. Finalizing fold transition.")
-                    # Không cần chạy vòng lặp epoch, chỉ cần hoàn thiện fold.
                     pass 
 
         # --- D. Initialize TensorBoard Writer ---
@@ -314,7 +304,7 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
             print(f"Epoch {epoch+1}/{N_EPOCHS_PER_FOLD}")
             print(f"  Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
 
-            # Ghi vào TensorBoard (add_scalars để vẽ 2 đường trên cùng 1 biểu đồ)
+            # Ghi vào TensorBoard 
             writer.add_scalars('Loss', {'Train': train_loss, 'Validation': val_loss}, epoch + 1)
             writer.add_scalars('Accuracy_Top1', {'Train': train_acc, 'Validation': val_acc}, epoch + 1)
             writer.add_scalars('Accuracy_Top5', {'Train': train_top5, 'Validation': val_top5}, epoch + 1)
@@ -331,10 +321,9 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
             checkpoint_state = {
                 'run_name': run_name,
                 'current_fold_index': fold_idx,
-                'next_epoch_index': epoch + 1, # Lưu index của epoch tiếp theo
+                'next_epoch_index': epoch + 1,
                 'fold_results': cv_results,
                 'best_val_acc_in_fold': best_val_acc_in_fold,
-                # Lưu trạng thái hiện tại của model/optimizer/scheduler
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
@@ -343,7 +332,6 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         
         # Kết thúc Fold
         writer.close()
-        # Đảm bảo kết quả chỉ được thêm một lần cho mỗi fold
         if len(cv_results) <= fold_idx:
             cv_results.append(best_val_acc_in_fold)
         
@@ -354,9 +342,9 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         checkpoint_state = {
              'run_name': run_name,
              'current_fold_index': fold_idx + 1,
-             'next_epoch_index': 0, # Fold tiếp theo bắt đầu từ epoch 0
+             'next_epoch_index': 0, 
              'fold_results': cv_results,
-             # Cố ý bỏ qua trạng thái model/optimizer khi chuyển Fold để giữ checkpoint nhẹ khi chuyển giao.
+             # Bỏ qua trạng thái model/optimizer khi chuyển Fold để giữ checkpoint nhẹ khi chuyển giao.
         }
         save_checkpoint(CV_CHECKPOINT_PATH, checkpoint_state)
 
