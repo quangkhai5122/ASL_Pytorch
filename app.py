@@ -29,7 +29,7 @@ MODEL_PATH = os.path.join("models", "model_best_fold_1.pth")
 CSV_PATH = "data/train.csv"
 
 PREDICTION_INTERVAL = 1.5
-CONFIDENCE_THRESHOLD = 0.3
+CONFIDENCE_THRESHOLD = 0.5
 MOVEMENT_THRESHOLD = 0.015
 
 # GUI Configuration
