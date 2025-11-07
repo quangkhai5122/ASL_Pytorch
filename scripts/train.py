@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Subset
-from torch.utils.tensorboard import SummaryWriter # Import TensorBoard SummaryWriter
+from torch.utils.tensorboard import SummaryWriter 
 import numpy as np
 import math
 import time
@@ -14,14 +14,14 @@ from datetime import datetime
 try:
     from scripts.config import (
         DEVICE, N_EPOCHS_PER_FOLD, LR_MAX, N_WARMUP_EPOCHS, OPTIMIZER_LR, OPTIMIZER_WD, CLIP_NORM,
-        LABEL_SMOOTHING, SEED, N_FOLDS, VAL_BATCH_SIZE
+        LABEL_SMOOTHING, SEED, N_FOLDS, VAL_BATCH_SIZE, WD_RATIO
     )
     from scripts.dataset import ASLParquetDataset, AllSignsBatchSampler
     from scripts.model import ASLTransformerModel
 except ImportError:
     from config import (
         DEVICE, N_EPOCHS_PER_FOLD, LR_MAX, N_WARMUP_EPOCHS, OPTIMIZER_LR, OPTIMIZER_WD, CLIP_NORM,
-        LABEL_SMOOTHING, SEED, N_FOLDS, VAL_BATCH_SIZE
+        LABEL_SMOOTHING, SEED, N_FOLDS, VAL_BATCH_SIZE, WD_RATIO
     )
     from dataset import ASLParquetDataset, AllSignsBatchSampler
     from model import ASLTransformerModel
@@ -45,11 +45,26 @@ def lrfn(current_step, num_warmup_steps, lr_max, num_cycles=0.50, num_training_s
         return max(0.0, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress))) * lr_max
 
 def get_lr_scheduler(optimizer):
+    # Pre-compute LR schedule for all epochs
+    lr_schedule = [lrfn(step, N_WARMUP_EPOCHS, LR_MAX, num_training_steps=N_EPOCHS_PER_FOLD) 
+                   for step in range(N_EPOCHS_PER_FOLD)]
+    
+    # Use LambdaLR with base_lr=1.0 to set LR directly (not as multiplier)
     scheduler = optim.lr_scheduler.LambdaLR(
         optimizer,
-        lr_lambda=lambda epoch: lrfn(epoch, N_WARMUP_EPOCHS, LR_MAX, num_training_steps=N_EPOCHS_PER_FOLD) / OPTIMIZER_LR
+        lr_lambda=lambda epoch: lr_schedule[epoch] if epoch < len(lr_schedule) else lr_schedule[-1]
     )
     return scheduler
+
+def update_adaptive_weight_decay(optimizer, wd_ratio):
+    """
+    Update weight decay adaptively based on current learning rate: weight_decay = learning_rate * wd_ratio
+    """
+    current_lr = optimizer.param_groups[0]['lr']
+    new_weight_decay = current_lr * wd_ratio
+    for param_group in optimizer.param_groups:
+        param_group['weight_decay'] = new_weight_decay
+    return new_weight_decay
 
 def accuracy(preds, labels):
     return (preds == labels).float().mean()
@@ -264,7 +279,8 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
 
         # --- B. Initialize Model, Optimizer, Scheduler ---
         model = ASLTransformerModel().to(DEVICE)
-        optimizer = optim.AdamW(model.parameters(), lr=OPTIMIZER_LR, weight_decay=OPTIMIZER_WD)
+        # Set base_lr=1.0 because scheduler will set LR directly
+        optimizer = optim.AdamW(model.parameters(), lr=1.0, weight_decay=OPTIMIZER_WD)
         scheduler = get_lr_scheduler(optimizer)
         criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
         
@@ -293,16 +309,22 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         # Bắt đầu từ start_epoch
         for epoch in range(start_epoch, N_EPOCHS_PER_FOLD):
             
+            # 0. Update Learning Rate and Adaptive Weight Decay
+            if epoch > 0:
+                scheduler.step()  
+            # Update weight decay based on current LR (weight_decay = lr * WD_RATIO)
+            new_wd = update_adaptive_weight_decay(optimizer, WD_RATIO)
+            
             # 1. Training & Validation
             train_loss, train_acc, train_top5 = train_epoch(model, train_loader, criterion, optimizer, DEVICE, epoch + 1, N_EPOCHS_PER_FOLD)
             val_loss, val_acc, val_top5 = validate_epoch(model, val_loader, criterion, DEVICE, epoch + 1, N_EPOCHS_PER_FOLD)
-            
-            # 2. Scheduler Step
-            scheduler.step()
 
             # 3. Logging
+            current_lr = optimizer.param_groups[0]['lr']
+            current_wd = optimizer.param_groups[0]['weight_decay']
             print(f"Epoch {epoch+1}/{N_EPOCHS_PER_FOLD}")
             print(f"  Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
+            print(f"  Learning Rate: {current_lr:.2e}, Weight Decay: {current_wd:.2e}")
 
             # Ghi vào TensorBoard 
             writer.add_scalars('Loss', {'Train': train_loss, 'Validation': val_loss}, epoch + 1)
