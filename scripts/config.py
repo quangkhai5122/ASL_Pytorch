@@ -20,8 +20,8 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 N_FOLDS = 5 
 
 # Training Batch Size (Balanced Sampler)
-# Batch size = NUM_CLASSES * BATCH_ALL_SIGNS_N (ví dụ: 250 * 1 = 250)
-BATCH_ALL_SIGNS_N = 1 
+# Batch size = NUM_CLASSES * BATCH_ALL_SIGNS_N (ví dụ: 250 * 4 = 1000)
+BATCH_ALL_SIGNS_N = 4 
 
 # Validation Batch Size (Standard Sampler)
 VAL_BATCH_SIZE = 64
@@ -31,7 +31,8 @@ N_WARMUP_EPOCHS = 0
 
 # Optimizer specific
 OPTIMIZER_LR = 1e-3
-OPTIMIZER_WD = 1e-5
+OPTIMIZER_WD = 1e-5  # Initial weight decay (will be overridden by adaptive callback)
+WD_RATIO = 0.05  # Weight decay ratio for adaptive weight decay (weight_decay = lr * WD_RATIO)
 CLIP_NORM = 1.0
 
 # Loss specific
