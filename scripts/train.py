@@ -310,8 +310,7 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         for epoch in range(start_epoch, N_EPOCHS_PER_FOLD):
             
             # 0. Update Learning Rate and Adaptive Weight Decay
-            if epoch > 0:
-                scheduler.step()  
+            scheduler.step(epoch)
             # Update weight decay based on current LR (weight_decay = lr * WD_RATIO)
             new_wd = update_adaptive_weight_decay(optimizer, WD_RATIO)
             
