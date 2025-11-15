@@ -21,11 +21,11 @@ N_FOLDS = 5
 
 # Training Batch Size (Balanced Sampler)
 # Batch size = NUM_CLASSES * BATCH_ALL_SIGNS_N (ví dụ: 250 * 4 = 1000)
-BATCH_ALL_SIGNS_N = 4 
+BATCH_ALL_SIGNS_N = 1
 
 # Validation Batch Size (Standard Sampler)
 VAL_BATCH_SIZE = 64
-N_EPOCHS_PER_FOLD = 100 
+N_EPOCHS_PER_FOLD = 200 
 LR_MAX = 1e-3
 N_WARMUP_EPOCHS = 0
 
