@@ -302,17 +302,17 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
                     print("[INFO] This fold was already completed. Finalizing fold transition.")
                     pass 
 
+        # Prime scheduler/weight decay so LR matches schedule before entering the loop
+        if start_epoch == 0:
+            scheduler.step(0)
+        update_adaptive_weight_decay(optimizer, WD_RATIO)
+
         # --- D. Initialize TensorBoard Writer ---
         writer = SummaryWriter(log_dir=os.path.join(tb_base_dir, f'fold_{fold_idx+1}'))
 
         # --- E. Training Loop cho Fold này ---
         # Bắt đầu từ start_epoch
         for epoch in range(start_epoch, N_EPOCHS_PER_FOLD):
-            
-            # 0. Update Learning Rate and Adaptive Weight Decay
-            scheduler.step(epoch)
-            # Update weight decay based on current LR (weight_decay = lr * WD_RATIO)
-            new_wd = update_adaptive_weight_decay(optimizer, WD_RATIO)
             
             # 1. Training & Validation
             train_loss, train_acc, train_top5 = train_epoch(model, train_loader, criterion, optimizer, DEVICE, epoch + 1, N_EPOCHS_PER_FOLD)
@@ -337,6 +337,10 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
                 model_save_path = os.path.join(save_dir_abs, f"model_best_fold_{fold_idx+1}.pth")
                 torch.save(model.state_dict(), model_save_path)
                 print(f"  [SAVE] New best model for Fold {fold_idx+1} saved! Val Acc: {best_val_acc_in_fold:.4f}")
+
+            # Chuẩn bị LR/WD cho epoch tiếp theo
+            scheduler.step()
+            update_adaptive_weight_decay(optimizer, WD_RATIO)
 
             # 5. Save Latest Checkpoint (Central CV State) - "Last Model"
             checkpoint_state = {
