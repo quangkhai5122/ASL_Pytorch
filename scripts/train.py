@@ -320,7 +320,7 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
 # =============================================================================
 # Cross-Validation Runner 
 # =============================================================================
-def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir='models/', tensorboard_dir='runs/', resume=True):
+def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir='models_cv/', tensorboard_dir='runs/', resume=True):
     print(f"--- Starting ASL Cross-Validation (PyTorch) ---")
     print(f"Device: {DEVICE} | Folds: {N_FOLDS} | Epochs per Fold: {N_EPOCHS_PER_FOLD}")
     
