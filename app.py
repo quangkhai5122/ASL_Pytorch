@@ -28,7 +28,7 @@ load_dotenv()
 MODEL_PATH = os.path.join("models", "model_best_full_training.pth")
 CSV_PATH = "data/train.csv"
 
-PREDICTION_INTERVAL = 1.5
+PREDICTION_INTERVAL = 2.5
 CONFIDENCE_THRESHOLD = 0.5
 MOVEMENT_THRESHOLD = 0.015
 
