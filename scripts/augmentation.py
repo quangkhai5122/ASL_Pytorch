@@ -6,7 +6,7 @@ class SpatialAugmentation:
     Applies spatial augmentations to landmarks: Rotation, Scaling, and Translation.
     Expects input shape: (T, N_LANDMARKS, 3) or (T, N_LANDMARKS, 2)
     """
-    def __init__(self, rotate_range=15, scale_range=0.2, shift_range=0.1, p=0.5):
+    def __init__(self, rotate_range=20, scale_range=0.25, shift_range=0.15, p=0.7):
         self.rotate_range = rotate_range # Degrees
         self.scale_range = scale_range   # Fraction (e.g., 0.2 means 0.8 to 1.2)
         self.shift_range = shift_range   # Fraction of the coordinate space (assuming normalized ~0-1)

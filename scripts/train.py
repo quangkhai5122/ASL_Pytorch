@@ -7,9 +7,11 @@ import numpy as np
 import math
 import time
 import os
+import pandas as pd
 from tqdm.auto import tqdm
 from sklearn.model_selection import StratifiedKFold # Import KFold
 from datetime import datetime
+from sklearn.model_selection import train_test_split
 
 try:
     from scripts.config import (
@@ -213,19 +215,41 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
     print(f"Starting ASL Full Training (PyTorch)")
     print(f"Device: {DEVICE} | Epochs: {N_EPOCHS}")
     
-    sign2ord_map, _ = load_data_maps(train_csv)
-    
-    # 1. Load Datasets
-    train_dataset = ASLParquetDataset(csv_path=train_csv, data_root=data_root, sign2ord_map=sign2ord_map, augment=True)
-    val_dataset = ASLParquetDataset(csv_path=val_csv, data_root=data_root, sign2ord_map=sign2ord_map, augment=False)
-    
-    if len(train_dataset) == 0 or len(val_dataset) == 0:
-        print("Training or validation dataset is empty. Please check CSV paths.")
+    # 1. Load and Merge Datasets
+    print("Loading and merging datasets...")
+    try:
+        df_train = pd.read_csv(train_csv)
+        df_test = pd.read_csv(val_csv)
+        
+        # Ensure 'sign' column exists in both
+        if 'sign' not in df_train.columns or 'sign' not in df_test.columns:
+            raise ValueError("CSV files must contain 'sign' column.")
+
+        # Merge
+        df_full = pd.concat([df_train, df_test], ignore_index=True)
+        print(f"Merged Train ({len(df_train)}) + Test ({len(df_test)}) = Total ({len(df_full)})")
+        
+        # Create Sign Map from full data
+        signs = sorted(df_full['sign'].unique())
+        sign2ord_map = {sign: i for i, sign in enumerate(signs)}
+        
+        # Stratified Split (85% Train, 15% Val)
+        train_df, val_df = train_test_split(df_full, test_size=0.15, stratify=df_full['sign'], random_state=42)
+        print(f"Split: Train ({len(train_df)}) | Val ({len(val_df)})")
+        
+    except Exception as e:
+        print(f"Error loading/merging data: {e}")
         return
 
-    print(f"Train samples: {len(train_dataset)} | Val samples: {len(val_dataset)}")
+    # 2. Create Datasets
+    train_dataset = ASLParquetDataset(data_source=train_df, data_root=data_root, sign2ord_map=sign2ord_map, augment=True)
+    val_dataset = ASLParquetDataset(data_source=val_df, data_root=data_root, sign2ord_map=sign2ord_map, augment=False)
+    
+    if len(train_dataset) == 0 or len(val_dataset) == 0:
+        print("Training or validation dataset is empty.")
+        return
 
-    # 2. DataLoader setup
+    # 3. DataLoader setup
     num_workers = min(os.cpu_count() if os.cpu_count() else 0, 8)
     pin_memory = True if DEVICE.type == 'cuda' else False
     
@@ -233,21 +257,24 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
     train_loader = DataLoader(train_dataset, batch_sampler=train_sampler, num_workers=num_workers, pin_memory=pin_memory)
     val_loader = DataLoader(val_dataset, batch_size=VAL_BATCH_SIZE, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
 
-    # 3. Setup Directories & checkpoint paths
+    # 4. Setup Directories & checkpoint paths
     save_dir_abs = resolve_save_dir(save_dir)
     checkpoint_path = os.path.join(save_dir_abs, "full_training_checkpoint_latest.pth")
     best_model_path = os.path.join(save_dir_abs, "model_best_full_training.pth")
 
-    run_name = f"ASL_FULL_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"ASL_FULL_MERGE_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     tb_base_dir = os.path.join(tensorboard_dir, run_name)
     
-    # 4. Initialize Model, Optimizer, Scheduler
+    # 5. Initialize Model, Optimizer, Scheduler
     model = ASLTransformerModel().to(DEVICE)
-    optimizer = optim.AdamW(model.parameters(), lr=1.0, weight_decay=OPTIMIZER_WD)
-    scheduler = get_lr_scheduler(optimizer, total_epochs=N_EPOCHS)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=OPTIMIZER_WD) # Reduced initial LR from 1.0 to 1e-3
+    
+    # Switch to ReduceLROnPlateau
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
+    
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
     
-    # 5. Resume Logic
+    # 6. Resume Logic
     start_epoch = 0
     best_val_acc = 0.0
     
@@ -267,11 +294,9 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
     writer = SummaryWriter(log_dir=os.path.join(tb_base_dir, 'full_run'))
 
     # Prime scheduler/weight decay so LR matches schedule before entering the loop
-    if start_epoch == 0:
-        scheduler.step(0)
     update_adaptive_weight_decay(optimizer, WD_RATIO)
 
-    # 6. Training Loop
+    # 7. Training Loop
     for epoch in range(start_epoch, N_EPOCHS):
         
         # Training & Validation
@@ -297,7 +322,7 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
             print(f"  [SAVE] New best model saved! Val Acc: {best_val_acc:.4f}")
 
         # Step LR/WD for next epoch
-        scheduler.step()
+        scheduler.step(val_acc)
         update_adaptive_weight_decay(optimizer, WD_RATIO)
 
         # Save latest checkpoint

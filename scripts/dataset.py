@@ -22,24 +22,27 @@ class ASLParquetDataset(Dataset):
     Dataset loads raw .parquet files and applies preprocessing on the fly.
     Optionally accepts a sign-to-ordinal mapping so train/val share the same label space.
     """
-    def __init__(self, csv_path='data/train.csv', data_root='data/', sign2ord_map=None, augment=False):
+    def __init__(self, data_source='data/train.csv', data_root='data/', sign2ord_map=None, augment=False):
         
-        # Handle paths dynamically
-        self.csv_path = self._resolve_path(csv_path)
         self.data_root = self._resolve_path(data_root)
         self.sign2ord_map = sign2ord_map
         self.augment = augment
         
         if self.augment:
-            self.spatial_aug = SpatialAugmentation()
+            self.spatial_aug = SpatialAugmentation(rotate_range=20, scale_range=0.2, shift_range=0.15, p=0.7)
 
-        if not os.path.exists(self.csv_path):
-            print(f"Error: train.csv not found at {self.csv_path}")
-            self.df = pd.DataFrame()
-            self.labels = np.array([])
-            return
-
-        self.df = pd.read_csv(self.csv_path)
+        # Handle data_source (can be path string or DataFrame)
+        if isinstance(data_source, pd.DataFrame):
+            self.df = data_source.copy()
+        else:
+            # Assume it's a path
+            self.csv_path = self._resolve_path(data_source)
+            if not os.path.exists(self.csv_path):
+                print(f"Error: CSV not found at {self.csv_path}")
+                self.df = pd.DataFrame()
+                self.labels = np.array([])
+                return
+            self.df = pd.read_csv(self.csv_path)
         
         if self.sign2ord_map is not None:
             self.df['sign_ord'] = self.df['sign'].map(self.sign2ord_map)

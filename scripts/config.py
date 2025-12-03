@@ -39,7 +39,7 @@ WD_RATIO = 0.05  # Weight decay ratio for adaptive weight decay (weight_decay = 
 CLIP_NORM = 1.0
 
 # Loss specific
-LABEL_SMOOTHING = 0.1
+LABEL_SMOOTHING = 0.25
 
 # =============================================================================
 # Landmark Indices 
@@ -90,8 +90,8 @@ MLP_RATIO = 2
 NUM_HEADS = 8 
 
 # Dropout
-MLP_DROPOUT_RATIO = 0.30
-CLASSIFIER_DROPOUT_RATIO = 0.10
+MLP_DROPOUT_RATIO = 0.35
+CLASSIFIER_DROPOUT_RATIO = 0.30
 
 # Augmentation
 FRAME_MASK_RATIO = 0.15 # Random Frame Masking probability
