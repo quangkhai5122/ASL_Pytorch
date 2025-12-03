@@ -12,6 +12,9 @@ import sys
 import tkinter as tk
 from tkinter import ttk
 from PIL import Image, ImageTk
+import pyttsx3
+import threading
+
 from scripts.config import N_ROWS, N_DIMS, DEVICE
 from scripts.model import ASLTransformerModel
 from scripts.preprocess import PreprocessLayer
@@ -29,7 +32,7 @@ MODEL_PATH = os.path.join("models", "model_best_full_training.pth")
 CSV_PATH = "data/train.csv"
 
 PREDICTION_INTERVAL = 2.5
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.4
 MOVEMENT_THRESHOLD = 0.015
 
 # GUI Configuration
@@ -94,6 +97,7 @@ class ASLApp:
         self.current_sign = "Initializing..."
         self.display_sentence = ""
         self.current_sign_color = "blue"
+        self.top_5_predictions = [] # List of (sign, confidence) tuples
 
         # Setup GUI Layout
         self.setup_gui()
@@ -117,17 +121,7 @@ class ASLApp:
         """Loads models, mappings, and APIs."""
         # 1. Load Label Mappings
         _, self.ORD2SIGN = load_data_maps(CSV_PATH)
-        self.gemini_model = None
-        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-        if GOOGLE_API_KEY:
-            try:
-                genai.configure(api_key=GOOGLE_API_KEY)
-                self.gemini_model = genai.GenerativeModel('gemini-2.5-pro')
-                print("Gemini API (2.5 Pro) Initialized.")
-            except Exception as e:
-                print(f"Warning: Could not initialize Gemini API: {e}.")
-        else:
-            print("Warning: GOOGLE_API_KEY not found.")
+        if not self.ORD2SIGN: sys.exit(1)
 
         # 2. Initialize PyTorch Model
         self.model = ASLTransformerModel()
@@ -151,26 +145,50 @@ class ASLApp:
         # 4. Initialize MediaPipe and OpenCV Capture
         self.mp_holistic = mp.solutions.holistic
         self.holistic = self.mp_holistic.Holistic(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+        self.mp_drawing = mp.solutions.drawing_utils
+        self.mp_drawing_styles = mp.solutions.drawing_styles
+        
         self.cap = cv2.VideoCapture(0)
         if not self.cap.isOpened():
             print("Error: Could not open webcam."); sys.exit(1)
 
+        # 5. Initialize Gemini
+        self.gemini_model = None
+        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+        if GOOGLE_API_KEY:
+            try:
+                genai.configure(api_key=GOOGLE_API_KEY)
+                self.gemini_model = genai.GenerativeModel('gemini-2.5-pro')
+                print("Gemini API (2.5 Pro) Initialized.")
+            except Exception as e:
+                print(f"Warning: Could not initialize Gemini API: {e}.")
+        else:
+            print("Warning: GOOGLE_API_KEY not found.")
+
+        # 6. Initialize TTS
+        try:
+            self.tts_engine = pyttsx3.init()
+            print("TTS Engine Initialized.")
+        except Exception as e:
+            print(f"Warning: Could not initialize TTS: {e}")
+            self.tts_engine = None
+
     def on_info_frame_resize(self, event):
-        padding = 30 # Tổng padding ngang (15px trái + 15px phải)
+        padding = 30 
         new_wraplength = event.width - padding
         if new_wraplength > padding:
-            # Cập nhật thuộc tính wraplength cho các nhãn cần xuống dòng
-            self.buffer_label.config(wraplength=new_wraplength)
-            self.sentence_label.config(wraplength=new_wraplength)
+            # Update wraplength for labels in both tabs
+            if hasattr(self, 'buffer_label_auto'): self.buffer_label_auto.config(wraplength=new_wraplength)
+            if hasattr(self, 'sentence_label_auto'): self.sentence_label_auto.config(wraplength=new_wraplength)
+            if hasattr(self, 'buffer_label_manual'): self.buffer_label_manual.config(wraplength=new_wraplength)
+            if hasattr(self, 'sentence_label_manual'): self.sentence_label_manual.config(wraplength=new_wraplength)
 
     def setup_gui(self):
         """Creates the Tkinter layout using Grid for better responsiveness."""
         self.main_frame = ttk.Frame(self.window)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Cấu hình Grid layout cho main_frame
         self.main_frame.grid_rowconfigure(0, weight=1)
-        # Cấu hình cột với trọng số tương ứng
         self.main_frame.grid_columnconfigure(0, weight=CAMERA_WEIGHT)
         self.main_frame.grid_columnconfigure(1, weight=INFO_WEIGHT)
 
@@ -181,43 +199,125 @@ class ASLApp:
         self.camera_label = tk.Label(self.camera_frame)
         self.camera_label.pack(fill=tk.BOTH, expand=True, anchor='center')
 
-        # Right Panel (Information)
+        # Right Panel (Information with Tabs)
         self.info_frame = ttk.Frame(self.main_frame)
         self.info_frame.grid(row=0, column=1, sticky="nsew")
         self.info_frame.pack_propagate(False) 
+        
+        self.notebook = ttk.Notebook(self.info_frame)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # --- Tab 1: Automatic Mode ---
+        self.tab_auto = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_auto, text="Automatic Mode")
+        self.setup_tab_auto(self.tab_auto)
 
+        # --- Tab 2: Manual Mode ---
+        self.tab_manual = ttk.Frame(self.notebook)
+        self.notebook.add(self.tab_manual, text="Manual Mode")
+        self.setup_tab_manual(self.tab_manual)
+        
+        self.info_frame.bind("<Configure>", self.on_info_frame_resize)
+        self.update_gui_info()
+
+    def setup_tab_auto(self, parent):
         # 1. Current Sign Status
-        tk.Label(self.info_frame, text="Current Sign / Status:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(20, 5))
-        self.sign_var = tk.StringVar()
-        self.sign_label = tk.Label(self.info_frame, textvariable=self.sign_var, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT)
-        self.sign_label.pack(fill=tk.X, padx=15)
+        tk.Label(parent, text="Current Sign / Status:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(20, 5))
+        self.sign_var_auto = tk.StringVar()
+        self.sign_label_auto = tk.Label(parent, textvariable=self.sign_var_auto, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT)
+        self.sign_label_auto.pack(fill=tk.X, padx=15)
 
         # 2. Word Buffer
-        tk.Label(self.info_frame, text="Word Buffer:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(30, 5))
-        self.buffer_var = tk.StringVar()
-        self.buffer_label = tk.Label(self.info_frame, textvariable=self.buffer_var, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, height=2)
-        self.buffer_label.pack(fill=tk.X, padx=15)
+        tk.Label(parent, text="Word Buffer:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(30, 5))
+        self.buffer_var_auto = tk.StringVar()
+        self.buffer_label_auto = tk.Label(parent, textvariable=self.buffer_var_auto, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, height=2)
+        self.buffer_label_auto.pack(fill=tk.X, padx=15)
 
         # 3. Generated Sentence
-        tk.Label(self.info_frame, text="Generated Sentence:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(30, 5))
-        self.sentence_var = tk.StringVar()
-
-        self.sentence_label = tk.Label(self.info_frame, textvariable=self.sentence_var, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, fg="green")
-        self.sentence_label.pack(fill=tk.X, padx=15)
+        tk.Label(parent, text="Generated Sentence:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(30, 5))
+        self.sentence_var_auto = tk.StringVar()
+        self.sentence_label_auto = tk.Label(parent, textvariable=self.sentence_var_auto, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, fg="green")
+        self.sentence_label_auto.pack(fill=tk.X, padx=15)
         
+        # Audio Button
+        tk.Button(parent, text="🔊 Play Audio", command=self.play_audio, font=FONT_SMALL).pack(anchor='w', padx=15, pady=5)
+
         # 4. Instructions
         instructions = "Controls:\n[G] Generate Sentence\n[C] Clear Session\n[Q] Quit"
-        tk.Label(self.info_frame, text=instructions, font=FONT_SMALL, anchor='w', justify=tk.LEFT, fg="gray").pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=20)
-        self.info_frame.bind("<Configure>", self.on_info_frame_resize)
+        tk.Label(parent, text=instructions, font=FONT_SMALL, anchor='w', justify=tk.LEFT, fg="gray").pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=20)
 
-        self.update_gui_info()
+    def setup_tab_manual(self, parent):
+        # 1. Top 5 Predictions
+        tk.Label(parent, text="Top 5 Predictions (Click to Add):", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(20, 5))
+        self.top5_frame = ttk.Frame(parent)
+        self.top5_frame.pack(fill=tk.X, padx=15)
+        self.top5_buttons = []
+        for i in range(5):
+            btn = tk.Button(self.top5_frame, text=f"{i+1}. ...", font=FONT_MEDIUM, command=lambda idx=i: self.manual_add_word(idx))
+            btn.pack(fill=tk.X, pady=2)
+            self.top5_buttons.append(btn)
+
+        # 2. Word Buffer
+        tk.Label(parent, text="Word Buffer:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(30, 5))
+        self.buffer_var_manual = tk.StringVar()
+        self.buffer_label_manual = tk.Label(parent, textvariable=self.buffer_var_manual, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, height=2)
+        self.buffer_label_manual.pack(fill=tk.X, padx=15)
+
+        # 3. Generated Sentence
+        tk.Label(parent, text="Generated Sentence:", font=FONT_LARGE, anchor='w').pack(fill=tk.X, padx=15, pady=(30, 5))
+        self.sentence_var_manual = tk.StringVar()
+        self.sentence_label_manual = tk.Label(parent, textvariable=self.sentence_var_manual, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, fg="green")
+        self.sentence_label_manual.pack(fill=tk.X, padx=15)
+        
+        # Audio Button
+        tk.Button(parent, text="🔊 Play Audio", command=self.play_audio, font=FONT_SMALL).pack(anchor='w', padx=15, pady=5)
+
+        # 4. Instructions
+        instructions = "Controls:\n[G] Generate Sentence\n[C] Clear Session\n[Q] Quit"
+        tk.Label(parent, text=instructions, font=FONT_SMALL, anchor='w', justify=tk.LEFT, fg="gray").pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=20)
 
     def update_gui_info(self):
         """Updates the text variables for the GUI labels."""
-        self.sign_var.set(self.current_sign)
-        self.sign_label.config(fg=self.current_sign_color)
-        self.buffer_var.set(" ".join(self.recognised_words_buffer) if self.recognised_words_buffer else "(Empty)")
-        self.sentence_var.set(self.display_sentence)
+        # Auto Tab Updates
+        self.sign_var_auto.set(self.current_sign)
+        self.sign_label_auto.config(fg=self.current_sign_color)
+        buffer_text = " ".join(self.recognised_words_buffer) if self.recognised_words_buffer else "(Empty)"
+        self.buffer_var_auto.set(buffer_text)
+        self.sentence_var_auto.set(self.display_sentence)
+
+        # Manual Tab Updates
+        self.buffer_var_manual.set(buffer_text)
+        self.sentence_var_manual.set(self.display_sentence)
+        
+        # Update Top 5 Buttons
+        if self.top_5_predictions:
+            for i, btn in enumerate(self.top5_buttons):
+                if i < len(self.top_5_predictions):
+                    sign, conf = self.top_5_predictions[i]
+                    btn.config(text=f"{i+1}. {sign} ({conf:.2f})", state=tk.NORMAL)
+                else:
+                    btn.config(text="...", state=tk.DISABLED)
+        else:
+            for btn in self.top5_buttons:
+                btn.config(text="...", state=tk.DISABLED)
+
+    def manual_add_word(self, idx):
+        if self.top_5_predictions and idx < len(self.top_5_predictions):
+            sign, _ = self.top_5_predictions[idx]
+            self.recognised_words_buffer.append(sign)
+            print(f"Manually Added: {sign}")
+            self.update_gui_info()
+
+    def play_audio(self):
+        if self.display_sentence and self.tts_engine:
+            threading.Thread(target=self._speak_thread, args=(self.display_sentence,), daemon=True).start()
+    
+    def _speak_thread(self, text):
+        try:
+            self.tts_engine.say(text)
+            self.tts_engine.runAndWait()
+        except Exception as e:
+            print(f"TTS Error: {e}")
 
     def generate_sentence(self, event=None):
         if self.recognised_words_buffer:
@@ -237,6 +337,7 @@ class ASLApp:
         self.current_sign_color = "gray"
         self.sequence_data = []
         self.frame_num = 0
+        self.top_5_predictions = []
         self.update_gui_info()
 
     def quit_app(self, event=None):
@@ -286,6 +387,9 @@ class ASLApp:
         image_rgb.flags.writeable = False
         results = self.holistic.process(image_rgb)
 
+        # Draw Landmarks
+        self.draw_landmarks(frame, results)
+
         # Extract landmarks
         landmarks_df = create_frame_landmark_df(results, self.frame_num)
         self.sequence_data.append(landmarks_df)
@@ -298,9 +402,10 @@ class ASLApp:
             self.update_gui_info()
 
         # Display Camera Feed 
-        image_display = cv2.flip(image_rgb, 1)
+        image_display = cv2.flip(frame, 1) # Flip the frame with drawings
+        image_display = cv2.cvtColor(image_display, cv2.COLOR_BGR2RGB)
         
-        # Điều chỉnh kích thước ảnh để vừa với panel camera
+        # Resize
         panel_h = self.camera_frame.winfo_height()
         panel_w = self.camera_frame.winfo_width()
         img_h, img_w, _ = image_display.shape
@@ -316,13 +421,31 @@ class ASLApp:
                 except AttributeError:
                     img_pil = img_pil.resize((new_w, new_h), Image.ANTIALIAS)
 
-                # Chuyển sang ImageTk và cập nhật Label
                 imgtk = ImageTk.PhotoImage(image=img_pil)
                 self.camera_label.imgtk = imgtk
                 self.camera_label.configure(image=imgtk)
 
-        # Lên lịch cho lần cập nhật tiếp theo
         self.window.after(self.delay, self.update_frame)
+
+    def draw_landmarks(self, image, results):
+        # Draw pose, left and right hands
+        self.mp_drawing.draw_landmarks(
+            image,
+            results.pose_landmarks,
+            self.mp_holistic.POSE_CONNECTIONS,
+            landmark_drawing_spec=self.mp_drawing_styles.get_default_pose_landmarks_style())
+        self.mp_drawing.draw_landmarks(
+            image,
+            results.left_hand_landmarks,
+            self.mp_holistic.HAND_CONNECTIONS,
+            self.mp_drawing_styles.get_default_hand_landmarks_style(),
+            self.mp_drawing_styles.get_default_hand_connections_style())
+        self.mp_drawing.draw_landmarks(
+            image,
+            results.right_hand_landmarks,
+            self.mp_holistic.HAND_CONNECTIONS,
+            self.mp_drawing_styles.get_default_hand_landmarks_style(),
+            self.mp_drawing_styles.get_default_hand_connections_style())
 
     def process_sequence(self):
         """Handles movement detection and model inference."""
@@ -336,9 +459,10 @@ class ASLApp:
             self.current_sign = "(No Hands Detected)"
             self.current_sign_color = "red"
             self.sequence_data = []; self.frame_num = 0
+            self.top_5_predictions = []
             return
         
-        # Phân tích chuyển động (Standard Deviation)
+        # Movement Analysis
         std_devs = detected_hand_data.groupby(['type', 'landmark_index'])[['x', 'y']].std()
         mean_movement = std_devs.mean().mean() 
 
@@ -346,6 +470,7 @@ class ASLApp:
             self.current_sign = f"(Idling: {mean_movement:.4f})"
             self.current_sign_color = "red"
             self.sequence_data = []; self.frame_num = 0
+            self.top_5_predictions = []
             return
         
         # Model Inference
@@ -370,26 +495,39 @@ class ASLApp:
             # Inference
             if non_empty_idxs.max() != -1.0: 
                 output = self.model(processed_data, non_empty_idxs)
-                
                 probabilities = F.softmax(output, dim=1)
-                prediction = torch.argmax(probabilities, dim=1).item()
-                confidence = probabilities[0, prediction].item()
+                
+                # Get Top 5
+                top5_prob, top5_idx = torch.topk(probabilities, 5, dim=1)
+                self.top_5_predictions = []
+                for i in range(5):
+                    idx = top5_idx[0, i].item()
+                    prob = top5_prob[0, i].item()
+                    sign = self.ORD2SIGN.get(idx, "Unknown")
+                    self.top_5_predictions.append((sign, prob))
+
+                # Top 1 for Auto Mode
+                prediction = top5_idx[0, 0].item()
+                confidence = top5_prob[0, 0].item()
 
                 if confidence > CONFIDENCE_THRESHOLD:
                     predicted_sign = self.ORD2SIGN.get(prediction, "Unknown")
                     self.current_sign = f"{predicted_sign} ({confidence:.2f})"
                     self.current_sign_color = "blue"
                     
-                    # Deduplication logic
-                    if not self.recognised_words_buffer or self.recognised_words_buffer[-1] != predicted_sign:
-                        self.recognised_words_buffer.append(predicted_sign)
-                        print(f"Added: {predicted_sign} (Movement: {mean_movement:.4f})")
+                    # Auto Mode: Deduplication logic
+                    current_tab = self.notebook.index(self.notebook.select())
+                    if current_tab == 0: # Auto Tab
+                        if not self.recognised_words_buffer or self.recognised_words_buffer[-1] != predicted_sign:
+                            self.recognised_words_buffer.append(predicted_sign)
+                            print(f"Added: {predicted_sign} (Movement: {mean_movement:.4f})")
                 else:
                     self.current_sign = "(Low Confidence)"
                     self.current_sign_color = "orange"
             else:
                 self.current_sign = "(Dominant Hand Error)"
                 self.current_sign_color = "red"
+                self.top_5_predictions = []
 
         # Reset sequence data after prediction
         self.sequence_data = []
