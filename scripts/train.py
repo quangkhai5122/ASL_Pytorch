@@ -7,6 +7,7 @@ import numpy as np
 import math
 import time
 import os
+import argparse
 import pandas as pd
 from tqdm.auto import tqdm
 from sklearn.model_selection import StratifiedKFold # Import KFold
@@ -220,8 +221,7 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
     try:
         df_train = pd.read_csv(train_csv)
         df_test = pd.read_csv(val_csv)
-        
-        # Ensure 'sign' column exists in both
+
         if 'sign' not in df_train.columns or 'sign' not in df_test.columns:
             raise ValueError("CSV files must contain 'sign' column.")
 
@@ -345,30 +345,48 @@ def run_full_training(train_csv='data/train.csv', val_csv='data/test.csv', data_
 # =============================================================================
 # Cross-Validation Runner 
 # =============================================================================
-def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir='models_cv/', tensorboard_dir='runs/', resume=True):
+def run_cross_validation(train_csv='data/train.csv', val_csv='data/test.csv', data_root='data/', save_dir='models_cv/', tensorboard_dir='runs/', resume=True, folds_to_run=None):
     print(f"--- Starting ASL Cross-Validation (PyTorch) ---")
     print(f"Device: {DEVICE} | Folds: {N_FOLDS} | Epochs per Fold: {N_EPOCHS_PER_FOLD}")
-    
-    # 1. Load Dataset
+    if folds_to_run:
+        print(f"Running specific folds: {folds_to_run}")
+
+    # 1. Load and Merge Datasets
+    print("Loading and merging datasets...")
+    try:
+        df_train = pd.read_csv(train_csv)
+        df_test = pd.read_csv(val_csv)
+        if 'sign' not in df_train.columns or 'sign' not in df_test.columns:
+            raise ValueError("CSV files must contain 'sign' column.")
+        df_full = pd.concat([df_train, df_test], ignore_index=True)
+        print(f"Merged Train ({len(df_train)}) + Test ({len(df_test)}) = Total ({len(df_full)})")
+        signs = sorted(df_full['sign'].unique())
+        sign2ord_map = {sign: i for i, sign in enumerate(signs)}
+        
+    except Exception as e:
+        print(f"Error loading/merging data: {e}")
+        return
+
+    # 2. Create Dataset Instances
     # We need two instances: one for training (with augmentation) and one for validation (without)
-    dataset_train = ASLParquetDataset(csv_path=csv_path, data_root=data_root, augment=True)
-    dataset_val = ASLParquetDataset(csv_path=csv_path, data_root=data_root, augment=False)
+    # Both use the FULL merged dataframe. Splitting happens via KFold indices.
+    dataset_train = ASLParquetDataset(data_source=df_full, data_root=data_root, sign2ord_map=sign2ord_map, augment=True)
+    dataset_val = ASLParquetDataset(data_source=df_full, data_root=data_root, sign2ord_map=sign2ord_map, augment=False)
     
     if len(dataset_train) == 0: return
 
-    # 2. Initialize KFold (Deterministic splits)
+    # 3. Initialize KFold (Deterministic splits)
     # Use dataset_train for splitting (indices are same for both)
     kfold = StratifiedKFold(n_splits=N_FOLDS, shuffle=True, random_state=SEED)
     all_splits = list(kfold.split(dataset_train.df, dataset_train.labels))
     
-    # 3. Setup Directories và Checkpoint Path
+    # 4. Setup Directories & Checkpoint Path
     save_dir_abs = resolve_save_dir(save_dir)
     CV_CHECKPOINT_PATH = os.path.join(save_dir_abs, "cv_checkpoint_latest.pth")
     
-    # Khởi tạo trạng thái mặc định
-    start_fold = 0
+    # Initialize default state
     cv_results = []
-    run_name = f"ASL_CV_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    run_name = f"ASL_CV_MERGED_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     
     # 4. Resume Logic (Global CV State)
     is_resuming = False 
@@ -403,9 +421,18 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
     num_workers = min(os.cpu_count() if os.cpu_count() else 0, 8)
     pin_memory = True if DEVICE.type == 'cuda' else False
     
-    # 5. Vòng lặp Cross-Validation
-    # Bắt đầu từ start_fold
-    for fold_idx in range(start_fold, N_FOLDS):
+    # Determine which folds to process
+    if folds_to_run is not None:
+        folds_indices = [f - 1 for f in folds_to_run] # User passes 1-based, convert to 0-based
+    else:
+        folds_indices = range(N_FOLDS)
+
+    # 5. Cross-Validation Loop
+    for fold_idx in folds_indices:
+        if fold_idx < 0 or fold_idx >= N_FOLDS:
+            print(f"Skipping invalid fold index: {fold_idx + 1}")
+            continue
+
         print(f"\n{'='*20} FOLD {fold_idx+1}/{N_FOLDS} {'='*20}")
         
         # --- A. Setup DataLoaders ---
@@ -416,44 +443,47 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         train_labels_subset = dataset_train.labels[train_indices]
         train_sampler = AllSignsBatchSampler(train_labels_subset)
         
+        # Config common params to match run_full_training
+        num_workers = min(os.cpu_count() if os.cpu_count() else 0, 8)
+        pin_memory = True if DEVICE.type == 'cuda' else False
+
         train_loader = DataLoader(train_subset, batch_sampler=train_sampler, num_workers=num_workers, pin_memory=pin_memory)
         val_loader = DataLoader(val_subset, batch_size=VAL_BATCH_SIZE, shuffle=False, num_workers=num_workers, pin_memory=pin_memory)
 
         # --- B. Initialize Model, Optimizer, Scheduler ---
         model = ASLTransformerModel().to(DEVICE)
-        # Set base_lr=1.0 because scheduler will set LR directly
-        optimizer = optim.AdamW(model.parameters(), lr=1.0, weight_decay=OPTIMIZER_WD)
-        scheduler = get_lr_scheduler(optimizer, total_epochs=N_EPOCHS_PER_FOLD)
+        optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=OPTIMIZER_WD)
+        
+        # Use ReduceLROnPlateau
+        scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=5)
+        
         criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING)
         
-        # --- C. Resume Logic (Trong Fold) ---
+        # --- C. Resume Logic (Fold-Specific) ---
         start_epoch = 0
         best_val_acc_in_fold = 0.0
-
-        if resume and os.path.exists(CV_CHECKPOINT_PATH):
-            # Tải lại checkpoint
-            checkpoint = load_checkpoint(CV_CHECKPOINT_PATH, DEVICE, model, optimizer, scheduler)
-
-            if checkpoint and checkpoint.get('current_fold_index') == fold_idx:
-                print("[INFO] Resuming training within this fold...")
+        
+        FOLD_CHECKPOINT_PATH = os.path.join(save_dir_abs, f"checkpoint_fold_{fold_idx+1}.pth")
+        
+        if resume and os.path.exists(FOLD_CHECKPOINT_PATH):
+            checkpoint = load_checkpoint(FOLD_CHECKPOINT_PATH, DEVICE, model, optimizer, scheduler)
+            if checkpoint:
                 start_epoch = checkpoint.get('next_epoch_index', 0)
                 best_val_acc_in_fold = checkpoint.get('best_val_acc_in_fold', 0.0)
-                print(f"[INFO] Resuming at Epoch {start_epoch + 1}. Best Val Acc so far: {best_val_acc_in_fold:.4f}")
-
-                if start_epoch >= N_EPOCHS_PER_FOLD:
-                    print("[INFO] This fold was already completed. Finalizing fold transition.")
-                    pass 
-
-        # Prime scheduler/weight decay so LR matches schedule before entering the loop
-        if start_epoch == 0:
-            scheduler.step(0)
+                print(f"[INFO] Resuming FOLD {fold_idx+1} at Epoch {start_epoch + 1}. Best Val Acc: {best_val_acc_in_fold:.4f}")
+        
+        # Prime scheduler/weight decay
+        # scheduler.step(0) removed for ReduceLROnPlateau
         update_adaptive_weight_decay(optimizer, WD_RATIO)
 
         # --- D. Initialize TensorBoard Writer ---
-        writer = SummaryWriter(log_dir=os.path.join(tb_base_dir, f'fold_{fold_idx+1}'))
+        # Include fold in run name to separate logs
+        fold_run_name = f"{run_name}_fold{fold_idx+1}"
+        tb_fold_dir = os.path.join(tensorboard_dir, fold_run_name)
+        os.makedirs(tb_fold_dir, exist_ok=True)
+        writer = SummaryWriter(log_dir=tb_fold_dir)
 
-        # --- E. Training Loop cho Fold này ---
-        # Bắt đầu từ start_epoch
+        # --- E. Training Loop ---
         for epoch in range(start_epoch, N_EPOCHS_PER_FOLD):
             
             # 1. Training & Validation
@@ -467,55 +497,39 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
             print(f"  Train Loss: {train_loss:.4f}, Acc: {train_acc:.4f} | Val Loss: {val_loss:.4f}, Acc: {val_acc:.4f}")
             print(f"  Learning Rate: {current_lr:.2e}, Weight Decay: {current_wd:.2e}")
 
-            # Ghi vào TensorBoard 
+            # TensorBoard
             writer.add_scalars('Loss', {'Train': train_loss, 'Validation': val_loss}, epoch + 1)
             writer.add_scalars('Accuracy_Top1', {'Train': train_acc, 'Validation': val_acc}, epoch + 1)
             writer.add_scalars('Accuracy_Top5', {'Train': train_top5, 'Validation': val_top5}, epoch + 1)
-            writer.add_scalar('LearningRate', optimizer.param_groups[0]['lr'], epoch + 1)
+            writer.add_scalar('LearningRate', current_lr, epoch + 1)
             
-            # 4. Save Best Model (Fold-specific) - "Best Model"
+            # 4. Save Best Model
             if val_acc > best_val_acc_in_fold:
                 best_val_acc_in_fold = val_acc
                 model_save_path = os.path.join(save_dir_abs, f"model_best_fold_{fold_idx+1}.pth")
                 torch.save(model.state_dict(), model_save_path)
                 print(f"  [SAVE] New best model for Fold {fold_idx+1} saved! Val Acc: {best_val_acc_in_fold:.4f}")
 
-            # Chuẩn bị LR/WD cho epoch tiếp theo
-            scheduler.step()
+            # Step Scheduler & WD
+            scheduler.step(val_acc)
             update_adaptive_weight_decay(optimizer, WD_RATIO)
 
-            # 5. Save Latest Checkpoint (Central CV State) - "Last Model"
+            # 5. Save Fold Checkpoint
             checkpoint_state = {
                 'run_name': run_name,
-                'current_fold_index': fold_idx,
+                'fold_index': fold_idx,
                 'next_epoch_index': epoch + 1,
-                'fold_results': cv_results,
                 'best_val_acc_in_fold': best_val_acc_in_fold,
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'scheduler_state_dict': scheduler.state_dict(),
             }
-            save_checkpoint(CV_CHECKPOINT_PATH, checkpoint_state)
+            save_checkpoint(FOLD_CHECKPOINT_PATH, checkpoint_state)
         
-        # Kết thúc Fold
         writer.close()
-        if len(cv_results) <= fold_idx:
-            cv_results.append(best_val_acc_in_fold)
-        
         print(f"\nFold {fold_idx+1} Finished. Best Validation Accuracy: {best_val_acc_in_fold:.4f}")
         
-        # Cập nhật checkpoint để chuẩn bị cho Fold tiếp theo
-        # Đánh dấu fold hiện tại đã hoàn thành và trỏ đến fold tiếp theo.
-        checkpoint_state = {
-            'run_name': run_name,
-            'current_fold_index': fold_idx + 1,
-            'next_epoch_index': 0, 
-            'fold_results': cv_results,
-            # Bỏ qua trạng thái model/optimizer khi chuyển Fold để giữ checkpoint nhẹ khi chuyển giao.
-        }
-        save_checkpoint(CV_CHECKPOINT_PATH, checkpoint_state)
-
-        # Giải phóng bộ nhớ GPU
+        # Cleanup
         del model, optimizer, scheduler, train_loader, val_loader
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -533,4 +547,13 @@ def run_cross_validation(csv_path='data/train.csv', data_root='data/', save_dir=
         print(f"\nMean CV Accuracy: {mean_acc:.4f} (+/- {std_acc:.4f})")
 
 if __name__ == '__main__':
-    run_full_training()
+    parser = argparse.ArgumentParser(description="ASL Training Script")
+    parser.add_argument("--mode", type=str, default="full", choices=["full", "cv"], help="Training mode: 'full' for full data, 'cv' for cross-validation")
+    parser.add_argument("--folds", type=int, nargs="+", help="Specific folds to run (1-based), e.g., --folds 1 2 3")
+    
+    args = parser.parse_args()
+    
+    if args.mode == "full":
+        run_full_training()
+    elif args.mode == "cv":
+        run_cross_validation(folds_to_run=args.folds)
