@@ -626,34 +626,80 @@ class ASLAppOptimized:
         self.main_frame = ttk.Frame(self.window)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
 
-        self.main_frame.grid_rowconfigure(0, weight=1)
-        self.main_frame.grid_columnconfigure(0, weight=CAMERA_WEIGHT)
-        self.main_frame.grid_columnconfigure(1, weight=INFO_WEIGHT)
+        # ===== Top bar: Tab buttons (fixed at top-left) =====
+        self.tab_bar = ttk.Frame(self.main_frame)
+        self.tab_bar.pack(fill=tk.X, side=tk.TOP, padx=5, pady=5)
+        
+        self.current_tab = tk.IntVar(value=0)
+        
+        self.tab_btn_auto = ttk.Radiobutton(
+            self.tab_bar, text="Automatic Mode", 
+            variable=self.current_tab, value=0,
+            command=lambda: self._switch_tab(0)
+        )
+        self.tab_btn_auto.pack(side=tk.LEFT, padx=5)
+        
+        self.tab_btn_manual = ttk.Radiobutton(
+            self.tab_bar, text="Manual Mode",
+            variable=self.current_tab, value=1,
+            command=lambda: self._switch_tab(1)
+        )
+        self.tab_btn_manual.pack(side=tk.LEFT, padx=5)
+        
+        self.tab_btn_translate = ttk.Radiobutton(
+            self.tab_bar, text="Text2Sign Mode",
+            variable=self.current_tab, value=2,
+            command=lambda: self._switch_tab(2)
+        )
+        self.tab_btn_translate.pack(side=tk.LEFT, padx=5)
+        
+        self.tab_btn_dictionary = ttk.Radiobutton(
+            self.tab_bar, text="Dictionary Mode",
+            variable=self.current_tab, value=3,
+            command=lambda: self._switch_tab(3)
+        )
+        self.tab_btn_dictionary.pack(side=tk.LEFT, padx=5)
+
+        # ===== Content area =====
+        self.content_frame = ttk.Frame(self.main_frame)
+        self.content_frame.pack(fill=tk.BOTH, expand=True)
+
+        # ----- Recognition view (Tab 1 & 2): Camera + Info panel -----
+        self.recognition_view = ttk.Frame(self.content_frame)
+        self.recognition_view.grid_rowconfigure(0, weight=1)
+        self.recognition_view.grid_columnconfigure(0, weight=CAMERA_WEIGHT)
+        self.recognition_view.grid_columnconfigure(1, weight=INFO_WEIGHT)
 
         # Left: Camera
-        self.camera_frame = ttk.Frame(self.main_frame)
+        self.camera_frame = ttk.Frame(self.recognition_view)
         self.camera_frame.grid(row=0, column=0, sticky="nsew")
         self.camera_frame.pack_propagate(False)
         self.camera_label = tk.Label(self.camera_frame)
         self.camera_label.pack(fill=tk.BOTH, expand=True, anchor='center')
 
-        # Right: Tabs
-        self.info_frame = ttk.Frame(self.main_frame)
+        # Right: Info panel (content switches based on tab selection)
+        self.info_frame = ttk.Frame(self.recognition_view)
         self.info_frame.grid(row=0, column=1, sticky="nsew")
         self.info_frame.pack_propagate(False)
 
-        self.notebook = ttk.Notebook(self.info_frame)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
-
-        self.tab_auto = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_auto, text="Automatic Mode")
+        # Auto mode content
+        self.tab_auto = ttk.Frame(self.info_frame)
         self.setup_tab_auto(self.tab_auto)
 
-        self.tab_manual = ttk.Frame(self.notebook)
-        self.notebook.add(self.tab_manual, text="Manual Mode")
+        # Manual mode content
+        self.tab_manual = ttk.Frame(self.info_frame)
         self.setup_tab_manual(self.tab_manual)
 
+        # ----- Translate view (Tab 3): Full width -----
+        self.setup_tab_translate()
+        
+        # ----- Dictionary view (Tab 4): Full width -----
+        self.setup_tab_dictionary()
+
         self.info_frame.bind("<Configure>", self.on_info_frame_resize)
+        
+        # Show Tab 1 by default
+        self._switch_tab(0)
         self.update_gui_info()
 
     def setup_tab_auto(self, parent):
@@ -672,7 +718,7 @@ class ASLAppOptimized:
         self.sentence_label_auto = tk.Label(parent, textvariable=self.sentence_var_auto, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, fg="green")
         self.sentence_label_auto.pack(fill=tk.X, padx=15)
 
-        tk.Button(parent, text="🔊 Play Audio", command=self.play_audio, font=FONT_SMALL).pack(anchor='w', padx=15, pady=5)
+        tk.Button(parent, text="Play Audio", command=self.play_audio, font=FONT_SMALL).pack(anchor='w', padx=15, pady=5)
 
         instructions = "Controls:\n[G] Generate Sentence\n[C] Clear Session\n[Q] Quit"
         tk.Label(parent, text=instructions, font=FONT_SMALL, anchor='w', justify=tk.LEFT, fg="gray").pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=20)
@@ -697,10 +743,48 @@ class ASLAppOptimized:
         self.sentence_label_manual = tk.Label(parent, textvariable=self.sentence_var_manual, font=FONT_MEDIUM, anchor='w', justify=tk.LEFT, wraplength=1, fg="green")
         self.sentence_label_manual.pack(fill=tk.X, padx=15)
 
-        tk.Button(parent, text="🔊 Play Audio", command=self.play_audio, font=FONT_SMALL).pack(anchor='w', padx=15, pady=5)
+        tk.Button(parent, text="Play Audio", command=self.play_audio, font=FONT_SMALL).pack(anchor='w', padx=15, pady=5)
 
         instructions = "Controls:\n[G] Generate Sentence\n[C] Clear Session\n[Q] Quit"
         tk.Label(parent, text=instructions, font=FONT_SMALL, anchor='w', justify=tk.LEFT, fg="gray").pack(side=tk.BOTTOM, fill=tk.X, padx=15, pady=20)
+
+    def setup_tab_translate(self):
+        """Setup Tab 3: Text to Sign Translation"""
+        from scripts.text_to_sign_tab import TextToSignTab
+        
+        self.translate_view = TextToSignTab(self.content_frame, gemini_model=self.gemini_model)
+
+    def setup_tab_dictionary(self):
+        """Setup Tab 4: Dictionary Mode"""
+        from scripts.dictionary_tab import DictionaryTab
+        
+        self.dictionary_view = DictionaryTab(self.content_frame)
+
+    def _switch_tab(self, tab_index: int):
+        """Switch between tabs - show/hide appropriate views"""
+        # Hide all views first
+        self.recognition_view.pack_forget()
+        self.translate_view.pack_forget()
+        self.dictionary_view.pack_forget()
+        self.tab_auto.pack_forget()
+        self.tab_manual.pack_forget()
+        
+        if tab_index == 0:  # Automatic mode
+            # Show recognition view (camera + auto info)
+            self.recognition_view.pack(fill=tk.BOTH, expand=True)
+            self.tab_auto.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        elif tab_index == 1:  # Manual mode
+            # Show recognition view (camera + manual info)
+            self.recognition_view.pack(fill=tk.BOTH, expand=True)
+            self.tab_manual.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        elif tab_index == 2:  # Text → Sign
+            # Show translate view (full width)
+            self.translate_view.pack(fill=tk.BOTH, expand=True)
+        else:  # Tab 4: Dictionary Mode
+            # Show dictionary view (full width)
+            self.dictionary_view.pack(fill=tk.BOTH, expand=True)
+        
+        self.current_tab.set(tab_index)
 
     # ---------------- UI updates ----------------
 
@@ -813,6 +897,18 @@ class ASLAppOptimized:
                 self.worker.join(timeout=1.0)
         except Exception:
             pass
+        # Cleanup translate view
+        try:
+            if hasattr(self, 'translate_view'):
+                self.translate_view.destroy()
+        except Exception:
+            pass
+        # Cleanup dictionary view
+        try:
+            if hasattr(self, 'dictionary_view'):
+                self.dictionary_view.destroy()
+        except Exception:
+            pass
         try:
             self.window.destroy()
         except Exception:
@@ -843,10 +939,9 @@ class ASLAppOptimized:
 
                 self.top_5_predictions = list(pred_state.top5)
 
-                # Auto-commit word only in Auto tab
+                # Auto-commit word only in Auto tab (tab index 0)
                 if pred_state.commit_word:
-                    current_tab = self.notebook.index(self.notebook.select())
-                    if current_tab == 0:
+                    if self.current_tab.get() == 0:
                         if not self.recognised_words_buffer or self.recognised_words_buffer[-1] != pred_state.commit_word:
                             self.recognised_words_buffer.append(pred_state.commit_word)
 
