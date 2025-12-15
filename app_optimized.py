@@ -61,22 +61,21 @@ CSV_PATH = "data/train.csv"
 
 
 # Inference / gating parameters (tune for your dataset)
-WINDOW_SIZE = 64                 # number of frames in the rolling window
-MIN_FRAMES_FOR_INFER = 16        # do not infer too early
+WINDOW_SIZE = 32                 # number of frames in the rolling window. was 64
+MIN_FRAMES_FOR_INFER = 8         # do not infer too early. was 16
 INFER_STRIDE_FRAMES = 4          # run inference every N frames
 MIN_INFER_GAP_SEC = 0.08         # time-based throttle
 
-CONFIDENCE_ON = 0.40             # hysteresis ON threshold
-CONFIDENCE_OFF = 0.20            # hysteresis OFF threshold
-CONFIDENCE_UNKNOWN = 0.15        # show unknown below this
+CONFIDENCE_ON = 0.25             # hysteresis ON threshold. was 0.40
+CONFIDENCE_OFF = 0.12            # hysteresis OFF threshold. was 0.20
+CONFIDENCE_UNKNOWN = 0.08        # show unknown below this. was 0.15
 
-STABILITY_N = 2                  # stable predictions needed to commit a word
-PROB_EMA_ALPHA = 0.80            # higher = smoother (slower reaction)
+STABILITY_N = 3                  # stable predictions needed to commit a word. was 2
+PROB_EMA_ALPHA = 0.55            # higher = smoother (slower reaction). was 0.80
 
 # Motion gating (cheap incremental metric on hand keypoints)
-MOVEMENT_THRESHOLD = 0.010       # if avg motion below -> idling (tune)
-MIN_HAND_POINTS = 6              # minimum detected hand points per frame (across both hands)
-
+MOVEMENT_THRESHOLD = 0.003       # if avg motion below -> idling (tune). was 0.01
+MIN_HAND_POINTS = 4              # minimum detected hand points per frame (across both hands). was 6
 
 # GUI configuration
 WINDOW_WIDTH = 1400
