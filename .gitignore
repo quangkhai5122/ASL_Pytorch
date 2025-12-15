@@ -1,0 +1,10 @@
+.venv/
+.vscode/
+baseline/
+data/
+test_landmark_files/
+train_landmark_files/
+models/
+runs/
+.env
+__pycache__/
