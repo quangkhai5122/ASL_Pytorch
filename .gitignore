@@ -8,3 +8,4 @@ models/
 runs/
 .env
 __pycache__/
+.pth
