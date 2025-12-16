@@ -19,8 +19,8 @@ from tqdm import tqdm
 import os
 
 # Cấu hình
-INPUT_DIR = Path("data/WLASL_Filter")
-OUTPUT_DIR = Path("data/WLASL_Mediapipe")
+INPUT_DIR = Path("data/WLASL_Only1Video")
+OUTPUT_DIR = Path("data/WLASL_Skeleton")
 
 # Số lượng landmark theo từng loại
 FACE_LANDMARKS = 468
