@@ -1,5 +1,5 @@
 """
-Sign Dictionary - Đọc và xử lý dữ liệu từ WLASL_Mediapipe
+Sign Dictionary - Đọc và xử lý dữ liệu từ WLASL_Skeleton
 Mỗi gloss có 1 file parquet duy nhất: {gloss}.parquet
 """
 import pandas as pd
@@ -16,11 +16,11 @@ from scripts.slp_config import (
 
 class SignDictionary:
     """
-    Dictionary để quản lý và truy xuất dữ liệu từ WLASL_Mediapipe.
+    Dictionary để quản lý và truy xuất dữ liệu từ WLASL_Skeleton.
     Mỗi gloss tương ứng với 1 file .parquet.
     """
     
-    def __init__(self, data_dir: str = "data/WLASL_Mediapipe"):
+    def __init__(self, data_dir: str = "data/WLASL_Skeleton"):
         """
         Args:
             data_dir: Đường dẫn đến thư mục chứa các file .parquet

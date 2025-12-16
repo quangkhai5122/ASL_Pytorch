@@ -1,6 +1,6 @@
 """
 Sign Language Sentence to Video Generator
-Sử dụng WLASL_Mediapipe làm từ điển
+Sử dụng WLASL_Skeleton làm từ điển
 """
 import argparse
 import os
@@ -16,7 +16,7 @@ from scripts.sign_visualizer import SignVisualizer
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Sign Language Sentence-to-Video Generator using WLASL_Mediapipe"
+        description="Sign Language Sentence-to-Video Generator using WLASL_Skeleton"
     )
     parser.add_argument(
         "--sentence", 
@@ -33,7 +33,7 @@ def main():
     parser.add_argument(
         "--data_dir", 
         type=str, 
-        default="data/WLASL_Mediapipe",
+        default="data/WLASL_Skeleton",
         help="Directory containing parquet files"
     )
     parser.add_argument(

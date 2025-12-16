@@ -1,5 +1,5 @@
 """
-Configuration cho Sign Language Production (SLP) với WLASL_Mediapipe
+Configuration cho Sign Language Production (SLP) với WLASL_Skeleton
 """
 import numpy as np
 
