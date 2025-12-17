@@ -94,21 +94,96 @@ class MotionSynthesizer:
     
     def _generate_smart_transition(self, seq_a: np.ndarray, seq_b: np.ndarray) -> np.ndarray:
         """
-        Tạo transition thông minh:
-        1. Tìm frame cuối A và frame đầu B tương tự nhất (pose matching)
-        2. Sử dụng ease-in-out interpolation
-        3. Đảm bảo IK constraints
+        Tạo transition thông minh với Hermite spline:
+        1. Sử dụng nhiều frame cuối A và đầu B để tính velocity
+        2. Hermite interpolation ràng buộc cả position và velocity
+        3. Đảm bảo C1 continuity (liên tục đạo hàm bậc 1)
         """
         n_trans = self.transition_frames
+        n_ctx = min(self.context_frames, len(seq_a) - 1, len(seq_b) - 1)
+        n_ctx = max(2, n_ctx)  # Cần ít nhất 2 frame để tính velocity
         
-        # Lấy frames cuối A và đầu B
-        end_frame = seq_a[-1]  # (153, 3)
-        start_frame = seq_b[0]  # (153, 3)
+        # Lấy context frames từ cuối A và đầu B
+        ctx_a = seq_a[-n_ctx:]  # (n_ctx, 153, 3) - vài frame cuối
+        ctx_b = seq_b[:n_ctx]   # (n_ctx, 153, 3) - vài frame đầu
         
-        # Tạo transition với ease-in-out
-        transition = self._ease_transition(end_frame, start_frame, n_trans)
+        # Tính velocity (đạo hàm) tại boundary
+        # Velocity cuối A: trung bình của vài frame cuối
+        vel_a = np.mean(np.diff(ctx_a, axis=0), axis=0)  # (153, 3)
+        
+        # Velocity đầu B: trung bình của vài frame đầu  
+        vel_b = np.mean(np.diff(ctx_b, axis=0), axis=0)  # (153, 3)
+        
+        # Position tại boundary
+        pos_a = seq_a[-1]  # (153, 3)
+        pos_b = seq_b[0]   # (153, 3)
+        
+        # Tạo transition với Hermite spline
+        transition = self._hermite_transition(pos_a, vel_a, pos_b, vel_b, n_trans)
         
         return transition.astype(np.float32)
+    
+    def _hermite_transition(self, pos_a: np.ndarray, vel_a: np.ndarray,
+                              pos_b: np.ndarray, vel_b: np.ndarray,
+                              n_frames: int) -> np.ndarray:
+        """
+        Hermite spline interpolation - ràng buộc cả position và velocity.
+        
+        Hermite basis functions:
+        h00(t) = 2t³ - 3t² + 1     (position at start)
+        h10(t) = t³ - 2t² + t       (velocity at start)
+        h01(t) = -2t³ + 3t²         (position at end)
+        h11(t) = t³ - t²            (velocity at end)
+        
+        P(t) = h00(t)*p0 + h10(t)*m0 + h01(t)*p1 + h11(t)*m1
+        
+        Đặc biệt xử lý hand validity như trước.
+        """
+        result = np.zeros((n_frames, *pos_a.shape), dtype=np.float32)
+        
+        # Check hand validity
+        start_left_valid = self._is_hand_valid(pos_a[IDX_LEFT_HAND])
+        start_right_valid = self._is_hand_valid(pos_a[IDX_RIGHT_HAND])
+        end_left_valid = self._is_hand_valid(pos_b[IDX_LEFT_HAND])
+        end_right_valid = self._is_hand_valid(pos_b[IDX_RIGHT_HAND])
+        
+        left_keep_invalid = not start_left_valid or not end_left_valid
+        right_keep_invalid = not start_right_valid or not end_right_valid
+        
+        # Scale velocities by transition duration for proper tangent magnitude
+        # Hermite expects tangent = velocity * duration
+        duration = n_frames + 1
+        m0 = vel_a * duration  # Tangent at start
+        m1 = vel_b * duration  # Tangent at end
+        
+        for i in range(n_frames):
+            t = (i + 1) / (n_frames + 1)
+            t2 = t * t
+            t3 = t2 * t
+            
+            # Hermite basis functions
+            h00 = 2*t3 - 3*t2 + 1
+            h10 = t3 - 2*t2 + t
+            h01 = -2*t3 + 3*t2
+            h11 = t3 - t2
+            
+            # Interpolate
+            result[i] = h00 * pos_a + h10 * m0 + h01 * pos_b + h11 * m1
+            
+            # Handle invalid hands
+            if left_keep_invalid:
+                if not start_left_valid:
+                    result[i, IDX_LEFT_HAND] = pos_a[IDX_LEFT_HAND]
+                else:
+                    result[i, IDX_LEFT_HAND] = pos_b[IDX_LEFT_HAND]
+            
+            if right_keep_invalid:
+                if not start_right_valid:
+                    result[i, IDX_RIGHT_HAND] = pos_a[IDX_RIGHT_HAND]
+                else:
+                    result[i, IDX_RIGHT_HAND] = pos_b[IDX_RIGHT_HAND]
+        
+        return result
     
     def _ease_transition(self, start_frame: np.ndarray, end_frame: np.ndarray, 
                          n_frames: int) -> np.ndarray:
