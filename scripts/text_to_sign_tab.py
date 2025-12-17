@@ -11,7 +11,7 @@ import numpy as np
 # Import sign language components
 from scripts.sign_dictionary import SignDictionary
 from scripts.motion_synthesizer import MotionSynthesizer
-from scripts.sign_video_player import SignVideoPlayer
+from scripts.sign_video_player_pil import SignVideoPlayer
 
 # Try import Gemini
 try:
