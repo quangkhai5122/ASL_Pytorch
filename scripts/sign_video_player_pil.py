@@ -53,7 +53,7 @@ class SignVideoPlayerPIL(ttk.Frame):
     
     SPEED_OPTIONS = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
     
-    def __init__(self, parent, width: int = 400, height: int = 400, fps: int = 25):
+    def __init__(self, parent, width: int = 400, height: int = 400, fps: int = 30):
         super().__init__(parent)
         
         self.width = width
@@ -141,7 +141,7 @@ class SignVideoPlayerPIL(ttk.Frame):
             self.speed_frame,
             textvariable=self.speed_var,
             values=[f"{s}x" for s in self.SPEED_OPTIONS],
-            width=8,
+            width=12,
             state="readonly"
         )
         self.speed_combo.pack(side=tk.LEFT, padx=2)

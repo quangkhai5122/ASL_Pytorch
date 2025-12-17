@@ -114,7 +114,7 @@ class VideoPlayer(ttk.Frame):
             self.speed_frame,
             textvariable=self.speed_var,
             values=[f"{s}x" for s in self.SPEED_OPTIONS],
-            width=8,
+            width=12,
             state="readonly"
         )
         self.speed_combo.pack(side=tk.LEFT, padx=2)
