@@ -141,7 +141,13 @@ class SignVideoPlayer(ttk.Frame):
             landmarks: Shape (T, 153, 3) - Avatar landmarks
             autoplay: Tự động play sau khi load
         """
+        # Stop any existing playback first
         self.stop()
+        
+        # Wait for thread to fully stop
+        if self._play_thread is not None and self._play_thread.is_alive():
+            self._play_thread.join(timeout=0.5)
+        self._play_thread = None
         
         self.landmarks = landmarks
         self.total_frames = landmarks.shape[0]
@@ -174,10 +180,23 @@ class SignVideoPlayer(ttk.Frame):
         self.is_playing = False
         self.btn_play.configure(text="▶ Play")
         self._stop_event.set()
+        
+        # Wait for thread to stop
+        if self._play_thread is not None and self._play_thread.is_alive():
+            self._play_thread.join(timeout=0.3)
+        self._play_thread = None
     
     def stop(self):
         """Stop animation and reset"""
-        self.pause()
+        self.is_playing = False
+        self._stop_event.set()
+        
+        # Wait for thread to fully stop
+        if self._play_thread is not None and self._play_thread.is_alive():
+            self._play_thread.join(timeout=0.3)
+        self._play_thread = None
+        
+        self.btn_play.configure(text="▶ Play")
         self.current_frame = 0
         self._update_progress()
     
@@ -222,9 +241,17 @@ class SignVideoPlayer(ttk.Frame):
             if self.landmarks is None:
                 break
             
+            # Check stop event before drawing
+            if self._stop_event.is_set():
+                break
+            
             # Draw current frame (schedule on main thread)
-            self.after(0, self._draw_frame, self.current_frame)
-            self.after(0, self._update_progress)
+            try:
+                self.after(0, self._draw_frame, self.current_frame)
+                self.after(0, self._update_progress)
+            except tk.TclError:
+                # Widget destroyed
+                break
             
             # Advance frame
             self.current_frame += 1
@@ -234,11 +261,20 @@ class SignVideoPlayer(ttk.Frame):
                 if self.loop:
                     self.current_frame = 0
                 else:
-                    self.after(0, self.pause)
+                    try:
+                        self.after(0, self.pause)
+                    except tk.TclError:
+                        pass
                     break
             
-            # Wait for next frame
-            time.sleep(self.frame_delay / 1000.0)
+            # Wait for next frame with interruptible sleep
+            sleep_time = self.frame_delay / 1000.0
+            # Split sleep into smaller chunks for faster response to stop
+            sleep_chunk = 0.02  # 20ms chunks
+            elapsed = 0.0
+            while elapsed < sleep_time and not self._stop_event.is_set():
+                time.sleep(min(sleep_chunk, sleep_time - elapsed))
+                elapsed += sleep_chunk
     
     def _draw_frame(self, frame_idx: int):
         """Draw a single frame"""
@@ -436,5 +472,14 @@ class SignVideoPlayer(ttk.Frame):
     def destroy(self):
         """Clean up resources"""
         self.stop()
-        plt.close(self.fig)
+        self.landmarks = None
+        
+        # Close matplotlib figure to free memory
+        try:
+            if hasattr(self, 'fig') and self.fig is not None:
+                plt.close(self.fig)
+                self.fig = None
+        except Exception:
+            pass
+        
         super().destroy()
