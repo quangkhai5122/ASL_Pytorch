@@ -14,7 +14,7 @@ from PIL import Image, ImageTk
 import time
 
 # Import for skeleton visualization
-from scripts.sign_video_player import SignVideoPlayer
+from scripts.sign_video_player_pil import SignVideoPlayer
 from scripts.slp_config import (
     FACE_RAW_IDXS, LEFT_HAND_RAW_IDXS, RIGHT_HAND_RAW_IDXS,
     POSE_RAW_IDXS, N_AVATAR_LANDMARKS
@@ -124,6 +124,11 @@ class VideoPlayer(ttk.Frame):
         """Load a video file"""
         self.stop()
         
+        # Ensure thread is fully stopped
+        if self._play_thread is not None and self._play_thread.is_alive():
+            self._play_thread.join(timeout=0.5)
+        self._play_thread = None
+        
         if not os.path.exists(video_path):
             self._show_placeholder("Video file not found")
             return False
@@ -167,13 +172,32 @@ class VideoPlayer(ttk.Frame):
         self.is_playing = False
         self.btn_play.configure(text="▶ Play")
         self._stop_event.set()
+        
+        # Wait for thread to stop
+        if self._play_thread is not None and self._play_thread.is_alive():
+            self._play_thread.join(timeout=0.3)
+        self._play_thread = None
     
     def stop(self):
         """Stop and reset video"""
-        self.pause()
+        self.is_playing = False
+        self._stop_event.set()
+        
+        # Wait for thread to fully stop
+        if self._play_thread is not None and self._play_thread.is_alive():
+            self._play_thread.join(timeout=0.3)
+        self._play_thread = None
+        
+        self.btn_play.configure(text="▶ Play")
+        
+        # Release video capture
         if self.cap is not None:
-            self.cap.release()
+            try:
+                self.cap.release()
+            except Exception:
+                pass
             self.cap = None
+        
         self.current_frame = 0
         self._update_progress()
     
@@ -208,9 +232,17 @@ class VideoPlayer(ttk.Frame):
             if self.cap is None:
                 break
             
+            # Check stop event before drawing
+            if self._stop_event.is_set():
+                break
+            
             # Show current frame
-            self.after(0, self._show_frame, self.current_frame)
-            self.after(0, self._update_progress)
+            try:
+                self.after(0, self._show_frame, self.current_frame)
+                self.after(0, self._update_progress)
+            except tk.TclError:
+                # Widget destroyed
+                break
             
             # Advance frame
             self.current_frame += 1
@@ -220,12 +252,20 @@ class VideoPlayer(ttk.Frame):
                 if self.loop:
                     self.current_frame = 0
                 else:
-                    self.after(0, self.pause)
+                    try:
+                        self.after(0, self.pause)
+                    except tk.TclError:
+                        pass
                     break
             
-            # Wait based on FPS and speed
+            # Wait based on FPS and speed - with interruptible sleep
             delay = 1.0 / (self.fps * self.speed)
-            time.sleep(delay)
+            # Split sleep into smaller chunks for faster response to stop
+            sleep_chunk = 0.02  # 20ms chunks
+            elapsed = 0.0
+            while elapsed < delay and not self._stop_event.is_set():
+                time.sleep(min(sleep_chunk, delay - elapsed))
+                elapsed += sleep_chunk
     
     def _show_frame(self, frame_idx: int):
         """Display a specific frame"""
@@ -293,6 +333,7 @@ class VideoPlayer(ttk.Frame):
     def destroy(self):
         """Clean up resources"""
         self.stop()
+        self.video_path = None
         super().destroy()
 
 
@@ -373,12 +414,14 @@ class DictionaryTab(ttk.Frame):
         )
         self.search_btn.pack(side=tk.RIGHT, padx=10)
         
-        # Autocomplete listbox (hidden by default)
-        self.autocomplete_frame = ttk.Frame(self.search_frame)
+        # Autocomplete listbox (hidden by default) - uses place() for overlay
+        self.autocomplete_frame = ttk.Frame(self)
         self.autocomplete_listbox = tk.Listbox(
             self.autocomplete_frame,
             height=5,
-            font=("Helvetica", 12)
+            font=("Helvetica", 12),
+            relief=tk.SOLID,
+            borderwidth=1
         )
         self.autocomplete_listbox.pack(fill=tk.BOTH, expand=True)
         self.autocomplete_listbox.bind("<Double-Button-1>", self._on_autocomplete_select)
@@ -433,7 +476,7 @@ class DictionaryTab(ttk.Frame):
         query = self.search_var.get().lower().strip()
         
         if len(query) < 1:
-            self.autocomplete_frame.grid_forget()
+            self.autocomplete_frame.place_forget()
             return
         
         # Find matching words
@@ -443,9 +486,16 @@ class DictionaryTab(ttk.Frame):
             self.autocomplete_listbox.delete(0, tk.END)
             for word in matches:
                 self.autocomplete_listbox.insert(tk.END, word)
-            self.autocomplete_frame.grid(row=1, column=0, sticky="ew", padx=40)
+            # Use place() for overlay - position below search bar
+            # Get search entry position relative to self
+            self.update_idletasks()
+            entry_x = self.search_entry.winfo_x() + self.search_frame.winfo_x()
+            entry_y = self.search_frame.winfo_y() + self.search_frame.winfo_height()
+            entry_width = self.search_entry.winfo_width()
+            self.autocomplete_frame.place(x=entry_x, y=entry_y, width=entry_width)
+            self.autocomplete_frame.lift()  # Bring to front
         else:
-            self.autocomplete_frame.grid_forget()
+            self.autocomplete_frame.place_forget()
     
     def _on_autocomplete_select(self, event=None):
         """Handle autocomplete selection"""
@@ -453,12 +503,12 @@ class DictionaryTab(ttk.Frame):
         if selection:
             word = self.autocomplete_listbox.get(selection[0])
             self.search_var.set(word)
-            self.autocomplete_frame.grid_forget()
+            self.autocomplete_frame.place_forget()
             self._search_word(word)
     
     def _on_search(self, event=None):
         """Handle search button click or Enter key"""
-        self.autocomplete_frame.grid_forget()
+        self.autocomplete_frame.place_forget()
         word = self.search_var.get().lower().strip()
         if word:
             self._search_word(word)
@@ -490,7 +540,7 @@ class DictionaryTab(ttk.Frame):
     
     def _on_escape_autocomplete(self, event=None):
         """Handle Escape - close autocomplete and return to search"""
-        self.autocomplete_frame.grid_forget()
+        self.autocomplete_frame.place_forget()
         self.search_entry.focus_set()
     
     def _search_word(self, word: str):
@@ -533,18 +583,14 @@ class DictionaryTab(ttk.Frame):
     
     def _show_skeleton_placeholder(self, message: str):
         """Show placeholder message in skeleton player without destroying controls"""
-        self.skeleton_player.pause()
+        self.skeleton_player.stop()
         self.skeleton_player.landmarks = None
         self.skeleton_player.total_frames = 0
         self.skeleton_player.current_frame = 0
         self.skeleton_player._update_frame_label()
         
-        # Draw placeholder
-        self.skeleton_player.ax.clear()
-        self.skeleton_player._setup_axes()
-        self.skeleton_player.ax.text(0.5, 0.5, message,
-                                     ha='center', va='center', fontsize=11, color='gray')
-        self.skeleton_player.canvas.draw_idle()
+        # Use the player's built-in placeholder method
+        self.skeleton_player._show_placeholder(message)
     
     def _load_skeleton(self, parquet_path: str) -> Optional[np.ndarray]:
         """Load skeleton data from parquet file and convert to avatar format"""
