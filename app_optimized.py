@@ -313,6 +313,8 @@ class CameraInferenceWorker(threading.Thread):
         # Keep last inference state to avoid UI flicker between inference steps
         self._last_state = PredictionState(current_sign="(Warming up)", current_sign_color="gray")
 
+        self._warmed_up = False
+
     def close(self):
         try:
             self.holistic.close()
@@ -354,6 +356,21 @@ class CameraInferenceWorker(threading.Thread):
             self.mp_styles.get_default_hand_landmarks_style(),
             self.mp_styles.get_default_hand_connections_style(),
         )
+
+    def _warmup_inference(self):
+        """Run a dummy inference to warm up GPU/CUDA."""
+        if self._warmed_up:
+            return
+        print("[Warmup] Running initial inference to warm up GPU...")
+        dummy = np.zeros((WINDOW_SIZE, N_ROWS, N_DIMS), dtype=np.float32)
+        input_tensor = torch.from_numpy(dummy).to(DEVICE)
+        with torch.inference_mode():
+            processed, non_empty = self.preprocess_layer(input_tensor)
+            processed = processed.unsqueeze(0)
+            non_empty = non_empty.unsqueeze(0)
+            _ = self.model(processed, non_empty)
+        self._warmed_up = True
+        print("[Warmup] Done!")
 
     def _try_infer(self, motion_avg: float) -> PredictionState:
         state = PredictionState()
@@ -436,6 +453,8 @@ class CameraInferenceWorker(threading.Thread):
 
     def run(self):
         try:
+            self._warmup_inference()
+            
             while not self.stop_event.is_set():
                 ok, frame_bgr = self.cap.read()
                 if not ok or frame_bgr is None:
