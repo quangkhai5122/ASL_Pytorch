@@ -36,4 +36,6 @@ See **scripts/config.py** for all hyperparameters.
 
 Video demo is available at: [Youtube](https://www.youtube.com/watch?v=50yL1u47uOA&t=84s)
 
-Detailed reports on data preprocessing/postprocessing, model architecture, and agent architecture are available at: [Drive](https://drive.google.com/file/d/1tXHl3bS5uRUdVgEqkqMYIK7U9vTq6D60/view?usp=drive_link)
+Detailed reports on data preprocessing/postprocessing, model architecture, and system are available at: [Drive](https://drive.google.com/file/d/1tXHl3bS5uRUdVgEqkqMYIK7U9vTq6D60/view?usp=drive_link)
+
+Post-training models and data for Pipeline Reverse Translation (Sign Language Production) are available at: [Drive](https://drive.google.com/drive/folders/1DyD8oOe-bxstQqINnTPm4LF-nZbRM0_k?usp=sharing)
