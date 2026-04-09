@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # FastAPI Backend Service
+  # ==========================================================================
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gislr-backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Load from .env file in backend directory
+      - ENVIRONMENT=development
+      - DEBUG=true
+      - DEVICE=cuda  # Use cuda if GPU available, else cpu
+      - LOG_LEVEL=DEBUG
+      - DATABASE_URL=sqlite:///./gislr.db
+      - RELOAD=true
+    volumes:
+      # Mount source code for development (auto-reload on code changes)
+      - ./backend/app:/app/app
+      - ./backend/models:/app/models
+      - ./backend/data:/app/data
+      - ./backend/scripts:/app/scripts
+      # Persist database
+      - backend_db:/app/db
+    environment_file:
+      - ./backend/.env
+    networks:
+      - gislr-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]  # For GPU support
+
+  # ==========================================================================
+  # PostgreSQL Database Service (Optional - for production user management)
+  # Uncomment to use PostgreSQL instead of SQLite
+  # ==========================================================================
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: gislr-postgres
+  #   environment:
+  #     POSTGRES_USER: gislr_user
+  #     POSTGRES_PASSWORD: gislr_password
+  #     POSTGRES_DB: gislr_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - gislr-network
+  #   restart: unless-stopped
+
+  # ==========================================================================
+  # Redis Cache Service (Optional - for caching predictions)
+  # Uncomment to enable Redis caching
+  # ==========================================================================
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: gislr-redis
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+  #   networks:
+  #     - gislr-network
+  #   restart: unless-stopped
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  backend_db:
+  # postgres_data:
+  # redis_data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+networks:
+  gislr-network:
+    driver: bridge
+
+# =============================================================================
+# Usage:
+# =============================================================================
+# Development:
+#   docker-compose up -d
+#
+# View logs:
+#   docker-compose logs -f backend
+#
+# Stop services:
+#   docker-compose down
+#
+# Rebuild image:
+#   docker-compose up --build -d
+#
+# Production deployment (with Postgres):
+#   1. Uncomment postgres service
+#   2. Update backend environment: DATABASE_URL=postgresql://gislr_user:gislr_password@postgres:5432/gislr_db
+#   3. docker-compose -f docker-compose.yml up -d

@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>ASL Backend - WebSocket Webcam Test</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: #0f1117; color: #e5e7eb;
+            display: flex; flex-direction: column; align-items: center;
+            min-height: 100vh; padding: 20px;
+        }
+        h1 { font-size: 1.5rem; margin-bottom: 8px; color: #60a5fa; }
+        .subtitle { font-size: 0.85rem; color: #6b7280; margin-bottom: 20px; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; max-width: 1000px; }
+        .panel {
+            background: #1a1d27; border: 1px solid #2d3748; border-radius: 12px;
+            padding: 16px; display: flex; flex-direction: column;
+        }
+        .panel h2 { font-size: 1rem; color: #9ca3af; margin-bottom: 12px; }
+        video, canvas { width: 100%; border-radius: 8px; background: #000; }
+        canvas { display: none; }
+        .controls { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+        button {
+            padding: 8px 16px; border: none; border-radius: 6px; font-size: 0.85rem;
+            cursor: pointer; font-weight: 600; transition: all 0.2s;
+        }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-primary:hover { background: #2563eb; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-danger:hover { background: #dc2626; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-success:hover { background: #059669; }
+        .btn-secondary { background: #374151; color: #e5e7eb; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status {
+            display: inline-flex; align-items: center; gap: 6px;
+            padding: 4px 12px; border-radius: 20px; font-size: 0.75rem;
+            margin-bottom: 12px;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-connected { background: #064e3b; color: #6ee7b7; }
+        .status-connected .status-dot { background: #10b981; }
+        .status-disconnected { background: #7f1d1d; color: #fca5a5; }
+        .status-disconnected .status-dot { background: #ef4444; }
+        .status-connecting { background: #78350f; color: #fde68a; }
+        .status-connecting .status-dot { background: #f59e0b; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .prediction-box {
+            background: #111827; border: 2px solid #374151; border-radius: 10px;
+            padding: 20px; text-align: center; margin-bottom: 12px;
+            transition: border-color 0.3s;
+        }
+        .prediction-box.active { border-color: #3b82f6; }
+        .prediction-sign { font-size: 2rem; font-weight: 700; color: #f9fafb; }
+        .prediction-conf { font-size: 1rem; color: #9ca3af; margin-top: 4px; }
+        .top5 { list-style: none; }
+        .top5 li {
+            display: flex; justify-content: space-between; padding: 4px 0;
+            border-bottom: 1px solid #1f2937; font-size: 0.8rem;
+        }
+        .top5 li:last-child { border-bottom: none; }
+        .top5 .sign-name { color: #d1d5db; }
+        .top5 .sign-conf { color: #6b7280; }
+        .log-box {
+            background: #111827; border-radius: 8px; padding: 8px;
+            max-height: 200px; overflow-y: auto; font-family: monospace; font-size: 0.7rem;
+            color: #6b7280; line-height: 1.4;
+        }
+        .log-entry { margin: 2px 0; }
+        .log-entry.error { color: #f87171; }
+        .log-entry.success { color: #34d399; }
+        .log-entry.info { color: #60a5fa; }
+        .stats {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+            margin-bottom: 12px;
+        }
+        .stat { text-align: center; }
+        .stat-value { font-size: 1.2rem; font-weight: 700; color: #f9fafb; }
+        .stat-label { font-size: 0.65rem; color: #6b7280; text-transform: uppercase; }
+        .committed-words {
+            background: #111827; border-radius: 8px; padding: 12px;
+            min-height: 40px; font-size: 0.9rem; color: #a5b4fc;
+            font-style: italic;
+        }
+        .footer { margin-top: 20px; font-size: 0.7rem; color: #4b5563; }
+    </style>
+</head>
+<body>
+    <h1>ASL Recognition - WebSocket Test</h1>
+    <p class="subtitle">Testing backend inference pipeline via webcam</p>
+
+    <div class="controls">
+        <button id="btnLogin" class="btn-primary" onclick="login()">1. Login</button>
+        <button id="btnCamera" class="btn-success" onclick="toggleCamera()" disabled>2. Start Camera</button>
+        <button id="btnConnect" class="btn-primary" onclick="toggleWebSocket()" disabled>3. Connect WS</button>
+        <button id="btnStream" class="btn-success" onclick="toggleStreaming()" disabled>4. Start Streaming</button>
+        <button id="btnClear" class="btn-secondary" onclick="clearLog()">Clear Log</button>
+    </div>
+
+    <div class="grid">
+        <!-- Left: Camera + Stats -->
+        <div class="panel">
+            <h2>Camera Feed</h2>
+            <div id="wsStatus" class="status status-disconnected">
+                <span class="status-dot"></span> Disconnected
+            </div>
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="canvas"></canvas>
+
+            <div class="stats" style="margin-top: 12px;">
+                <div class="stat">
+                    <div class="stat-value" id="statFrames">0</div>
+                    <div class="stat-label">Frames Sent</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statPredictions">0</div>
+                    <div class="stat-label">Predictions</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="statLatency">-</div>
+                    <div class="stat-label">Latency (ms)</div>
+                </div>
+            </div>
+
+            <h2>Committed Words</h2>
+            <div class="committed-words" id="committedWords">
+                (words will appear here when confirmed)
+            </div>
+        </div>
+
+        <!-- Right: Prediction + Log -->
+        <div class="panel">
+            <h2>Current Prediction</h2>
+            <div class="prediction-box" id="predBox">
+                <div class="prediction-sign" id="predSign">--</div>
+                <div class="prediction-conf" id="predConf">Waiting...</div>
+            </div>
+
+            <h2>Top 5</h2>
+            <ul class="top5" id="top5List">
+                <li><span class="sign-name">-</span><span class="sign-conf">-</span></li>
+            </ul>
+
+            <h2 style="margin-top: 12px;">Event Log</h2>
+            <div class="log-box" id="logBox"></div>
+        </div>
+    </div>
+
+    <p class="footer">Backend: http://localhost:8000 | Press F12 for console</p>
+
+    <script>
+        const API_URL = 'http://localhost:8000/api/v1';
+        let token = null;
+        let ws = null;
+        let cameraStream = null;
+        let streaming = false;
+        let streamInterval = null;
+        let frameId = 0;
+        let statsFrames = 0;
+        let statsPredictions = 0;
+
+        // ===== Logging =====
+        function log(msg, type = '') {
+            const box = document.getElementById('logBox');
+            const ts = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `[${ts}] ${msg}`;
+            box.prepend(entry);
+            if (box.children.length > 200) box.lastChild.remove();
+        }
+
+        function clearLog() { document.getElementById('logBox').innerHTML = ''; }
+
+        // ===== Login =====
+        async function login() {
+            try {
+                log('Logging in...', 'info');
+                const res = await fetch(`${API_URL}/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: 'testuser', password: 'testpass123' })
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || res.statusText);
+                }
+                const data = await res.json();
+                token = data.access_token;
+                log(`Logged in as "testuser" (token: ${token.substring(0, 20)}...)`, 'success');
+                document.getElementById('btnCamera').disabled = false;
+                document.getElementById('btnConnect').disabled = false;
+            } catch (e) {
+                log(`Login failed: ${e.message}`, 'error');
+            }
+        }
+
+        // ===== Camera =====
+        async function toggleCamera() {
+            const video = document.getElementById('video');
+            const btn = document.getElementById('btnCamera');
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+                video.srcObject = null;
+                btn.textContent = '2. Start Camera';
+                btn.className = 'btn-success';
+                log('Camera stopped');
+                return;
+            }
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, facingMode: 'user' }
+                });
+                video.srcObject = cameraStream;
+                btn.textContent = '2. Stop Camera';
+                btn.className = 'btn-danger';
+                log('Camera started (640x480)', 'success');
+            } catch (e) {
+                log(`Camera error: ${e.message}`, 'error');
+            }
+        }
+
+        // ===== WebSocket =====
+        function setWsStatus(status, text) {
+            const el = document.getElementById('wsStatus');
+            el.className = `status status-${status}`;
+            el.innerHTML = `<span class="status-dot"></span> ${text}`;
+        }
+
+        function toggleWebSocket() {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.close();
+                return;
+            }
+            connectWebSocket();
+        }
+
+        function connectWebSocket() {
+            if (!token) { log('Login first!', 'error'); return; }
+            setWsStatus('connecting', 'Connecting...');
+            log('Connecting WebSocket...', 'info');
+
+            const wsUrl = `ws://localhost:8000/api/v1/ws/stream?token=${token}`;
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                setWsStatus('connected', 'Connected');
+                log('WebSocket connected!', 'success');
+                document.getElementById('btnConnect').textContent = '3. Disconnect WS';
+                document.getElementById('btnConnect').className = 'btn-danger';
+                document.getElementById('btnStream').disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                const msg = JSON.parse(event.data);
+                handleMessage(msg);
+            };
+
+            ws.onclose = (e) => {
+                setWsStatus('disconnected', 'Disconnected');
+                log(`WebSocket closed (code: ${e.code})`, 'info');
+                document.getElementById('btnConnect').textContent = '3. Connect WS';
+                document.getElementById('btnConnect').className = 'btn-primary';
+                document.getElementById('btnStream').disabled = true;
+                stopStreaming();
+            };
+
+            ws.onerror = (e) => {
+                log('WebSocket error', 'error');
+                setWsStatus('disconnected', 'Error');
+            };
+        }
+
+        function handleMessage(msg) {
+            switch (msg.type) {
+                case 'connected':
+                    log(`Server: ${msg.message}`, 'success');
+                    break;
+                case 'prediction':
+                    statsPredictions++;
+                    document.getElementById('statPredictions').textContent = statsPredictions;
+                    document.getElementById('statLatency').textContent = Math.round(msg.processing_time_ms);
+
+                    const box = document.getElementById('predBox');
+                    box.classList.add('active');
+                    document.getElementById('predSign').textContent = msg.sign || '--';
+                    document.getElementById('predConf').textContent =
+                        `Confidence: ${(msg.confidence * 100).toFixed(1)}% | Motion: ${msg.motion?.toFixed(4) || '-'}`;
+
+                    // Top5
+                    if (msg.top5) {
+                        const list = document.getElementById('top5List');
+                        list.innerHTML = msg.top5.map(p =>
+                            `<li><span class="sign-name">${p.sign}</span><span class="sign-conf">${(p.confidence * 100).toFixed(1)}%</span></li>`
+                        ).join('');
+                    }
+
+                    // Commit event
+                    if (msg.commit) {
+                        log(`COMMIT: "${msg.commit.sign}" => [${msg.commit.word_buffer.join(', ')}]`, 'success');
+                        document.getElementById('committedWords').textContent =
+                            msg.commit.word_buffer.join(' ');
+                    }
+
+                    setTimeout(() => box.classList.remove('active'), 300);
+                    break;
+                case 'frame_received':
+                    // Buffering status
+                    break;
+                case 'status':
+                    document.getElementById('predConf').textContent = msg.message || msg.status;
+                    break;
+                case 'heartbeat':
+                    log(`Heartbeat: ${msg.frames_received} frames, ${msg.predictions_made} preds`, 'info');
+                    break;
+                case 'error':
+                    log(`Error: ${msg.error}`, 'error');
+                    break;
+                default:
+                    log(`Received: ${JSON.stringify(msg).substring(0, 100)}`);
+            }
+        }
+
+        // ===== Streaming =====
+        function toggleStreaming() {
+            if (streaming) {
+                stopStreaming();
+            } else {
+                startStreaming();
+            }
+        }
+
+        function startStreaming() {
+            if (!ws || ws.readyState !== WebSocket.OPEN) {
+                log('Connect WebSocket first!', 'error'); return;
+            }
+            if (!cameraStream) {
+                log('Start camera first!', 'error'); return;
+            }
+
+            streaming = true;
+            document.getElementById('btnStream').textContent = '4. Stop Streaming';
+            document.getElementById('btnStream').className = 'btn-danger';
+            log('Streaming started (sending frames at ~10 fps)', 'success');
+
+            const video = document.getElementById('video');
+            const canvas = document.getElementById('canvas');
+            const ctx = canvas.getContext('2d');
+
+            streamInterval = setInterval(() => {
+                if (!streaming || !ws || ws.readyState !== WebSocket.OPEN) return;
+
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                ctx.drawImage(video, 0, 0);
+
+                canvas.toBlob((blob) => {
+                    if (!blob) return;
+                    const reader = new FileReader();
+                    reader.onloadend = () => {
+                        const base64 = reader.result.split(',')[1];
+                        frameId++;
+                        statsFrames++;
+                        document.getElementById('statFrames').textContent = statsFrames;
+
+                        ws.send(JSON.stringify({
+                            type: 'frame',
+                            data: {
+                                frame_base64: base64,
+                                frame_id: frameId
+                            }
+                        }));
+                    };
+                    reader.readAsDataURL(blob);
+                }, 'image/jpeg', 0.8);
+            }, 100); // ~10 fps
+        }
+
+        function stopStreaming() {
+            streaming = false;
+            if (streamInterval) clearInterval(streamInterval);
+            streamInterval = null;
+            document.getElementById('btnStream').textContent = '4. Start Streaming';
+            document.getElementById('btnStream').className = 'btn-success';
+            log('Streaming stopped');
+        }
+    </script>
+</body>
+</html>
