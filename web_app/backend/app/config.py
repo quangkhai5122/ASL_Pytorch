@@ -87,6 +87,7 @@ class Settings(BaseSettings):
         "https://signlanguagetrans.lovable.app",
         "http://localhost:3000",
         "http://localhost:5173",
+        "http://localhost:8080",
         "http://localhost:8000",
     ]
     ALLOWED_HOSTS: List[str] = ["*"]

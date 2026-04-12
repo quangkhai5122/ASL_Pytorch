@@ -116,28 +116,27 @@ async def websocket_stream(
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
         return
 
-    # Accept connection
+    # Accept connection (use the returned connection object directly)
     try:
-        await connection_manager.connect(websocket, username)
+        connection = await connection_manager.connect(websocket, username)
+        print(f"[WS] Connection accepted for {username}")
     except Exception as e:
-        print(f"Connection error: {str(e)}")
+        print(f"[WS] Connection error for {username}: {str(e)}")
         return
-
-    connection = connection_manager.get_connection(username)
 
     # Start heartbeat task
     heartbeat_task = None
 
     try:
         # Send welcome message
-        await connection.send_json(
-            {
-                "type": "connected",
-                "message": f"Welcome {username}! Ready to receive frames.",
-                "server_version": settings.PROJECT_VERSION,
-                "max_frames": settings.WINDOW_SIZE,
-            }
-        )
+        welcome_msg = {
+            "type": "connected",
+            "message": f"Welcome {username}! Ready to receive frames.",
+            "server_version": settings.PROJECT_VERSION,
+            "max_frames": settings.WINDOW_SIZE,
+        }
+        await connection.send_json(welcome_msg)
+        print(f"[WS] Welcome message sent to {username}")
 
         # Start heartbeat coroutine
         async def heartbeat_loop():
@@ -146,10 +145,16 @@ async def websocket_stream(
                 while True:
                     await asyncio.sleep(30)  # Every 30 seconds
                     try:
-                        heartbeat_msg = await connection.send_heartbeat()
+                        heartbeat_msg = {
+                            "type": "heartbeat",
+                            "timestamp": datetime.now().isoformat(),
+                            "uptime_seconds": (datetime.now() - connection.connected_at).total_seconds(),
+                            "frames_received": connection.frame_count,
+                            "predictions_made": connection.prediction_count,
+                        }
                         await connection.send_json(heartbeat_msg)
                     except Exception as e:
-                        print(f"Heartbeat error for {username}: {str(e)}")
+                        print(f"[WS] Heartbeat error for {username}: {str(e)}")
                         break
             except asyncio.CancelledError:
                 pass
@@ -219,21 +224,23 @@ async def websocket_stream(
                 )
 
     except WebSocketDisconnect as e:
-        print(f"Client {username} disconnected: {e.code}")
-        stats = connection.get_stats()
-        print(f"  Final stats: {stats['total_frames']} frames, {stats['total_predictions']} predictions")
+        print(f"[WS] Client {username} disconnected: {e.code}")
+        try:
+            stats = connection.get_stats()
+            print(f"[WS]   Final stats: {stats['total_frames']} frames, {stats['total_predictions']} predictions")
+        except Exception:
+            pass
 
     except Exception as e:
-        print(f"WebSocket error for {username}: {str(e)}")
+        import traceback
+        print(f"[WS] Error for {username}: {str(e)}")
+        traceback.print_exc()
         try:
-            await websocket.close(code=status.WS_1011_SERVER_ERROR, reason=str(e))
+            await websocket.close(code=status.WS_1011_SERVER_ERROR, reason=str(e)[:120])
         except:
             pass
 
     finally:
-        # Cleanup
-        await connection_manager.disconnect(username)
-
         # Cancel heartbeat task
         if heartbeat_task:
             heartbeat_task.cancel()
@@ -242,7 +249,13 @@ async def websocket_stream(
             except asyncio.CancelledError:
                 pass
 
-        print(f"Connection closed for {username}")
+        # Only remove from manager if this connection is still the active one
+        # (prevents a reconnected session from being cleaned up by the old handler)
+        current = connection_manager.get_connection(username)
+        if current is connection:
+            await connection_manager.disconnect(username)
+
+        print(f"[WS] Connection closed for {username}")
 
 
 @router.get("/ws/stats")
