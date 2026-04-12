@@ -2,7 +2,7 @@
 
 ## The Problem
 
-You encountered a **bcrypt/passlib compatibility error** when starting the backend. This happened because:
+**Bcrypt/passlib compatibility error** when starting the backend. This happened because:
 
 ```
 (trapped) error reading bcrypt version
