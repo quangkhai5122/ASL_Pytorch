@@ -2,7 +2,7 @@
 
 Complete web deployment package for ASL/GISLR (Vietnamese Sign Language) recognition system.
 
-## 📋 Project Structure
+## Project Structure
 
 ```
 web_app/
@@ -37,7 +37,7 @@ web_app/
 │   ├── Dockerfile                   # Docker image definition
 │   ├── requirements.txt             # Python dependencies
 │   └── .env.example                 # Environment template
-│
+├── frontend/                        # App Sign Language Trans
 ├── docker-compose.yml               # Local development setup
 ├── kubernetes/                      # K8s manifests (future)
 ├── deployment/                      # Deployment scripts
@@ -46,7 +46,7 @@ web_app/
 └── README.md                        # This file
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 - Docker & Docker Compose
@@ -56,31 +56,25 @@ web_app/
 ### 1. Setup Environment
 
 ```bash
-cd web_app/backend
-
-# Copy environment template
-cp .env.example .env
-
-# Edit .env with your configuration
-# - GEMINI_API_KEY (if using sentence generation)
-# - DEVICE (cuda or cpu)
-# - SECRET_KEY (generate random 32-char string)
-```
-
-### 2. Run with Docker Compose
-
-```bash
 cd web_app
 
-# Start all services
-docker-compose up -d
+# Tao moi truong ao backend
+python -m venv backend_env
 
-# View logs
-docker-compose logs -f backend
+.\backend_env\Scripts\activate
 
-# Stop services
-docker-compose down
-```
+conda\deactivate
+
+pip install -r backend/requirements.txt
+
+### 2. Run server
+
+```bash
+cd web_app\backend
+
+..\web_app\backend_env\Scripts\pyxe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+npm run dev
 
 ### 3. Access API
 
@@ -88,15 +82,8 @@ docker-compose down
 - **ReDoc**: http://localhost:8000/api/v1/redoc
 - **Health Check**: http://localhost:8000/api/v1/health
 
-## � Documentation
 
-Complete documentation guides for different aspects:
-
-- **[QUICK_START.md](QUICK_START.md)** - 5-minute setup guide for first-time users
-- **[WEBSOCKET_INTEGRATION.md](WEBSOCKET_INTEGRATION.md)** - Real-time streaming with WebSocket (React examples)
-- **[TESTING.md](TESTING.md)** - Unit tests, integration tests, load testing guide
-
-## �📚 API Endpoints
+## API Endpoints
 
 ### Authentication
 - `POST /api/v1/auth/login` - Get JWT token
@@ -113,21 +100,18 @@ Complete documentation guides for different aspects:
 - `GET /api/v1/metrics` - Performance metrics
 - `GET /api/v1/info` - API information
 
-## 🔑 Test Credentials
+## Test Credentials
 
 For development/testing:
 
 ```
 Username: testuser
 Password: testpass123
-
-Username: demo
-Password: demo123
 ```
 
 **Remove test credentials endpoint in production!**
 
-## 🔗 Frontend Integration
+## Frontend Integration
 
 The backend is designed to work with the Lovable React frontend:
 https://github.com/quangkhai5122/signlanguagetrans
@@ -175,39 +159,7 @@ const prediction = await apiClient.post('/api/v1/predict/frame', {
 });
 ```
 
-## 🛠️ Development
-
-### Local Setup (Without Docker)
-
-```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-cd backend
-pip install -r requirements.txt
-
-# Run server
-uvicorn app.main:app --reload --port 8000
-```
-
-### Environment Variables
-
-Key variables in `.env`:
-
-```
-ENVIRONMENT=development
-DEBUG=true
-SECRET_KEY=your-secret-key-change-in-production
-DEVICE=auto  # auto|cuda|cpu
-ENABLE_GEMINI=true
-GEMINI_API_KEY=your-key
-```
-
-See `.env.example` for complete list.
-
-## 📦 Docker Deployment
+## Docker Deployment
 
 ### Build Image
 
@@ -232,7 +184,7 @@ docker run -d \
   signlang-api:latest
 ```
 
-## ☁️ Cloud Deployment
+## Cloud Deployment
 
 ### AWS ECS + GPU
 
@@ -254,7 +206,7 @@ aws ecr create-repository --repository-name signlang-api --region us-east-1
 ./deployment/gcp-deploy.sh
 ```
 
-## 🧪 Testing
+## Testing
 
 ### Unit Tests
 
@@ -287,14 +239,14 @@ pip install locust
 locust -f tests/load_test.py --host=http://localhost:8000
 ```
 
-## 📊 Performance Metrics
+## Performance Metrics
 
 - **Single frame inference**: ~50-100ms (GPU), ~200-300ms (CPU)
 - **Batch processing**: ~30-40ms per frame (optimized)
 - **Video upload**: ~2-5 seconds for 300-frame video
 - **Memory usage**: ~2GB model + ~4GB runtime (GPU)
 
-## 🔒 Security
+## Security
 
 ### Authentication
 - JWT-based stateless authentication
@@ -312,7 +264,7 @@ locust -f tests/load_test.py --host=http://localhost:8000
 - [ ] Enable rate limiting
 - [ ] Add monitoring & logging
 
-## 🛠️ Troubleshooting
+## Troubleshooting
 
 ### Model not loading
 ```
@@ -340,14 +292,14 @@ ModuleNotFoundError: No module named 'scripts'
 → Ensure scripts/ folder copied to web_app/backend/scripts/
 ```
 
-## 📝 Next Phase: WebSocket
+## Next Phase: WebSocket
 
 Real-time streaming implementation:
 - `WebSocket /api/v1/ws/stream` - Live frame streaming
 - JSON message protocol for frame data
 - Real-time predictions with sub-100ms latency
 
-## 📞 Support
+## Support
 
 For issues or questions:
 1. Check `.env` configuration
@@ -355,6 +307,6 @@ For issues or questions:
 3. Check API docs: http://localhost:8000/api/v1/docs
 4. Consult main project: [CV_GISLR](https://github.com/quangkhai5122/GISLR)
 
-## 📄 License
+## License
 
 Same as parent project
