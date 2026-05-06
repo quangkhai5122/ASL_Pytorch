@@ -9,3 +9,8 @@ runs/
 .env
 __pycache__/
 .pth
+backend_env/
+frontend/
+.md
+.bat
+.sh
