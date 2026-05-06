@@ -66,7 +66,7 @@ python -m venv backend_env
 conda\deactivate
 
 pip install -r backend/requirements.txt
-
+```
 ### 2. Run server
 
 ```bash
@@ -75,7 +75,7 @@ cd web_app\backend
 ..\web_app\backend_env\Scripts\pyxe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 npm run dev
-
+```
 ### 3. Access API
 
 - **API Docs**: http://localhost:8000/api/v1/docs
