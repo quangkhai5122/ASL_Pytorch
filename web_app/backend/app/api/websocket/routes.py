@@ -4,6 +4,7 @@ Handles WebSocket connections and real-time sign recognition.
 """
 
 import asyncio
+from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, HTTPException, status
 from fastapi.security import HTTPBearer
 

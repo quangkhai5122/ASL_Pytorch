@@ -4,10 +4,11 @@ Handles login and token management.
 """
 
 from datetime import timedelta
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import settings
 from app.core.auth import create_access_token, verify_password, get_password_hash
+from app.dependencies import get_current_user
 from app.schemas.request import LoginRequest
 from app.schemas.response import TokenResponse, ErrorResponse
 
@@ -66,29 +67,17 @@ async def login(credentials: LoginRequest) -> TokenResponse:
 
 
 @router.post("/verify", response_model=dict, responses={401: {"model": ErrorResponse}})
-async def verify_token(token: str) -> dict:
+async def verify_token(username: str = Depends(get_current_user)) -> dict:
     """
     Verify if a token is valid.
 
-    Args:
-        token: JWT token to verify
-
     Returns:
-        IsValid status
+        Token validity and username
 
     Raises:
         HTTPException: If token is invalid
     """
-    from app.core.auth import decode_token
-
-    username = decode_token(token)
-    if username is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
-
-    return {"valid": True, "username": username}
+    return {"valid": True, "username": username, "permissions": []}
 
 
 # Default test credentials endpoint (for frontend reference)
