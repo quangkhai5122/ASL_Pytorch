@@ -52,7 +52,9 @@ class LandmarkExtractionService:
             )
             print("[OK] MediaPipe Holistic initialized")
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize MediaPipe: {str(e)}")
+            print(f"[WARN] MediaPipe Holistic unavailable: {str(e)}")
+            print("[WARN] Landmark extraction will be disabled. Other endpoints will still work.")
+            self._holistic = None
 
     def extract_landmarks(self, frame: np.ndarray) -> Dict:
         """

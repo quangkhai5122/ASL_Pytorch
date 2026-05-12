@@ -15,7 +15,7 @@ services:
       # Load from .env file in backend directory
       - ENVIRONMENT=development
       - DEBUG=true
-      - DEVICE=cuda  # Use cuda if GPU available, else cpu
+      - DEVICE=cpu
       - LOG_LEVEL=DEBUG
       - DATABASE_URL=sqlite:///./gislr.db
       - RELOAD=true
@@ -23,22 +23,43 @@ services:
       # Mount source code for development (auto-reload on code changes)
       - ./backend/app:/app/app
       - ./backend/models:/app/models
-      - ./backend/data:/app/data
+      - ../data:/app/data
       - ./backend/scripts:/app/scripts
       # Persist database
       - backend_db:/app/db
-    environment_file:
+    env_file:
       - ./backend/.env
     networks:
       - gislr-network
     restart: unless-stopped
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]  # For GPU support
+#    deploy:
+#      resources:
+#        reservations:
+#          devices:
+#            - driver: nvidia
+#              count: all
+#              capabilities: [gpu]  # For GPU support
+
+  # ==========================================================================
+  # Vite React Frontend Service
+  # ==========================================================================
+  frontend:
+    build:
+      context: ./frontend/signlanguagetrans-main
+      dockerfile: Dockerfile
+    container_name: gislr-frontend
+    ports:
+      - "8080:8080"
+    volumes:
+      # Mount source code for HMR (hot module replacement)
+      - ./frontend/signlanguagetrans-main/src:/app/src
+      - ./frontend/signlanguagetrans-main/public:/app/public
+      - ./frontend/signlanguagetrans-main/index.html:/app/index.html
+    depends_on:
+      - backend
+    networks:
+      - gislr-network
+    restart: unless-stopped
 
   # ==========================================================================
   # PostgreSQL Database Service (Optional - for production user management)

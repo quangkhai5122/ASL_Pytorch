@@ -19,7 +19,8 @@ Pillow==11.3.0
 
 # Data Processing
 pandas==2.3.3
-scipy==1.16.3
+scipy==1.11.3
+pyarrow==14.0.1
 
 # Database & ORM
 sqlalchemy==2.0.23

@@ -13,8 +13,9 @@ from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 
 from app.config import settings
-from app.api.routes import auth, health, predict
+from app.api.routes import auth, health, predict, dictionary
 from app.api.websocket import routes as websocket_routes
+from fastapi.staticfiles import StaticFiles
 
 # Request tracking
 request_id_counter = 0
@@ -145,7 +146,18 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(predict.router)
+app.include_router(dictionary.router)
 app.include_router(websocket_routes.router)
+
+import os
+# Mount static files for dictionary videos
+DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
+if not os.path.exists(DATA_DIR):
+    DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../data"))
+VIDEO_DIR = os.path.join(DATA_DIR, "WLASL_Only1Video")
+
+if os.path.exists(VIDEO_DIR):
+    app.mount(f"{settings.API_V1_STR}/videos", StaticFiles(directory=VIDEO_DIR), name="videos")
 
 # =============================================================================
 # Root Endpoint
