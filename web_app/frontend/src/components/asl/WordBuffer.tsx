@@ -2,12 +2,23 @@ import { useASL } from "@/context/ASLContext";
 import { Button } from "@/components/ui/button";
 import { X, GripVertical, Pencil, Check } from "lucide-react";
 import { getConfidenceLevel } from "@/lib/mockData";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 
 export function WordBuffer() {
   const { buffer, removeFromBuffer, setBuffer } = useASL();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  // Auto-scroll to bottom when buffer changes (new word added)
+  useEffect(() => {
+    if (scrollContainerRef.current && buffer.length > 0) {
+      scrollContainerRef.current.scrollTo({
+        top: scrollContainerRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [buffer.length]);
 
   const startEdit = (id: string, gloss: string) => {
     setEditingId(id);
@@ -25,7 +36,12 @@ export function WordBuffer() {
         <h2 className="text-sm font-semibold">Word Buffer</h2>
         <span className="text-xs text-muted-foreground">{buffer.length} tokens</span>
       </div>
-      <div className="asl-panel-body h-[calc(100%-49px)] min-h-0 space-y-2 overflow-y-auto" role="list" aria-label="Word buffer tokens">
+      <div
+        ref={scrollContainerRef}
+        className="asl-panel-body h-[calc(100%-49px)] min-h-0 space-y-2 overflow-y-auto"
+        role="list"
+        aria-label="Word buffer tokens"
+      >
         {buffer.length === 0 &&
         <p className="text-xs text-muted-foreground text-center py-12">No tokens in buffer</p>
         }
