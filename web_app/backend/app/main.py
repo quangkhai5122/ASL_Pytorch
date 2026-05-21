@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 
 from app.config import settings
-from app.api.routes import auth, health, predict
+from app.api.routes import auth, health, predict, translate
 from app.api.websocket import routes as websocket_routes
 
 # Request tracking
@@ -145,6 +145,7 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(predict.router)
+app.include_router(translate.router)
 app.include_router(websocket_routes.router)
 
 # =============================================================================
