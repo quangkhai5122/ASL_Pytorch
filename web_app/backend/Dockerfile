@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM pytorch/pytorch:2.1.1-runtime-cuda12.1-runtime as builder
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime as builder
 
 WORKDIR /build
 
@@ -19,7 +19,7 @@ RUN pip install --upgrade pip setuptools wheel && \
 
 # =============================================================================
 # Stage 2: Runtime
-FROM pytorch/pytorch:2.1.1-runtime-cuda12.1-runtime
+FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
 
 LABEL maintainer="Sign Language Recognition Team"
 LABEL description="ASL/GISLR Sign Language Recognition - Web Backend API"

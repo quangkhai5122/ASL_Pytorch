@@ -1,0 +1,73 @@
+# 
+# Backend Dependencies for Sign Language Recognition Web Application
+# 
+
+# Core Web Framework
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+
+# Machine Learning & Deep Learning
+numpy
+scikit-learn
+
+# Computer Vision
+mediapipe
+opencv-python
+Pillow
+
+# Data Processing
+pandas
+scipy
+
+# Database & ORM
+sqlalchemy
+alembic
+pydantic
+pydantic-settings
+
+# Authentication & Security
+python-jose[cryptography]
+passlib[bcrypt]
+bcrypt
+python-jose
+cryptography
+JWT
+
+# API Documentation & Validation
+pydantic-core
+
+# Async & Concurrency
+aiofiles
+asyncio-contextmanager>=1.0.1
+
+# External APIs
+google-generativeai
+requests
+
+# AWS Integration (Optional)
+boto3
+botocore
+
+# Monitoring & Logging
+python-json-logger
+prometheus-client
+
+# Testing
+pytest
+pytest-asyncio
+pytest-cov
+httpx
+
+# Development Tools
+black
+isort
+flake8
+mypy
+
+# Performance Optimization
+gunicorn
+
+# Optional: Monitoring
+tensorboard
