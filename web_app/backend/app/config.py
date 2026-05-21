@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Model Configuration
     # ==========================================================================
-    MODEL_PATH: str = "./models/model_best_full_training.pth"
+    MODEL_PATH: str = os.path.join(os.path.dirname(__file__), "../../../models/model_best_full_training.pth")
     DEVICE: str = "auto"  # Options: auto, cuda, cpu
     NUM_CLASSES: int = 250
     INPUT_SIZE: int = 64

@@ -14,6 +14,7 @@ export interface WebSocketMessage {
   message?: string;
   frames_in_buffer?: number;
   status?: string;
+  landmarks?: (number[] | null)[];  // [543] entries, each [x, y, z] or null
   [key: string]: unknown;
 }
 
