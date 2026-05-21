@@ -96,3 +96,28 @@ class WebSocketMessage(BaseModel):
                 "frame_id": 1,
             }
         }
+
+
+class TranslateGlossRequest(BaseModel):
+    """Request to translate English text into ASL glosses."""
+
+    text: str = Field(
+        min_length=1,
+        max_length=500,
+        description="English sentence to translate into ASL glosses",
+    )
+    use_gemini: bool = Field(
+        default=True,
+        description=(
+            "Use Gemini API for intelligent gloss extraction "
+            "(falls back to rule-based if unavailable)"
+        ),
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "text": "Hello, what is your name?",
+                "use_gemini": True,
+            }
+        }

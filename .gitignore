@@ -11,6 +11,8 @@ __pycache__/
 .pth
 backend_env/
 frontend/
+!web_app/frontend/
+
 .md
 .bat
 .sh

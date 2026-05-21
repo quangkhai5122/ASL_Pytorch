@@ -38,61 +38,83 @@ class SignVisualizer:
             landmarks: Shape (T, 153, 3) - Avatar landmarks
             output_path: Đường dẫn output (.gif hoặc .mp4)
         """
-        import cv2
-        import imageio.v2 as imageio
-        
         T = landmarks.shape[0]
         print(f"Creating animation with {T} frames...")
-        
+
         # Setup figure
         plt.ioff()
         fig, ax = plt.subplots(figsize=self.figsize)
-        
+
         # Canvas dimensions
         height, width = 600, 600
-        fig.set_size_inches(width/100, height/100)
-        
+        fig.set_size_inches(width / 100, height / 100)
+
         # Output format
         is_gif = output_path.lower().endswith('.gif')
         frames_buffer = []
         writer = None
-        
+
         if not is_gif:
+            import cv2
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             writer = cv2.VideoWriter(output_path, fourcc, self.fps, (width, height))
-        
+
         # Render each frame
         for i in range(T):
             ax.clear()
             self._setup_axes(ax)
-            
+
             frame_data = landmarks[i]
             self._draw_frame(ax, frame_data)
-            
-            # Convert to image
+
+            # Convert matplotlib canvas → numpy RGB
             fig.canvas.draw()
-            img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-            img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
-            
+            try:
+                # matplotlib >= 3.8: use buffer_rgba()
+                buf = fig.canvas.buffer_rgba()
+                img = np.frombuffer(buf, dtype=np.uint8)
+                w, h = fig.canvas.get_width_height()
+                img = img.reshape(h, w, 4)[:, :, :3]  # RGBA → RGB
+            except AttributeError:
+                # fallback for older matplotlib
+                img = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+                img = img.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+
             if is_gif:
                 frames_buffer.append(img)
             else:
+                import cv2
                 img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
                 writer.write(img_bgr)
-            
+
             if i % 20 == 0:
                 print(f"  Rendered {i}/{T} frames", end='\r')
-        
+
         # Save output
         if is_gif:
             print(f"\nSaving GIF to {output_path}...")
-            imageio.mimsave(output_path, frames_buffer, fps=self.fps, loop=0)
+            try:
+                import imageio.v2 as iio
+                iio.mimsave(output_path, frames_buffer, fps=self.fps, loop=0)
+            except ImportError:
+                # Fallback: use Pillow to save GIF (no imageio needed)
+                from PIL import Image as PILImage
+                pil_frames = [PILImage.fromarray(f) for f in frames_buffer]
+                duration_ms = int(1000 / self.fps)
+                pil_frames[0].save(
+                    output_path,
+                    save_all=True,
+                    append_images=pil_frames[1:],
+                    duration=duration_ms,
+                    loop=0,
+                )
         else:
             writer.release()
             print(f"\nSaved video to {output_path}")
-            
+
         plt.close(fig)
         print("Done!")
+
         
     def _setup_axes(self, ax):
         """Setup axes cho visualization"""

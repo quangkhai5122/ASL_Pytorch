@@ -19,8 +19,9 @@ Pillow==11.3.0
 
 # Data Processing
 pandas==2.3.3
-scipy==1.11.3
-pyarrow==14.0.1
+scipy==1.16.3
+pyarrow>=14.0.0  # Required by SignDictionary to read WLASL_Skeleton .parquet files
+imageio>=2.33.0  # Required by SignVisualizer to save animated GIF files
 
 # Database & ORM
 sqlalchemy==2.0.23

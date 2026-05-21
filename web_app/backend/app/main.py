@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 from fastapi.openapi.utils import get_openapi
 
 from app.config import settings
-from app.api.routes import auth, health, predict, dictionary
+from app.api.routes import auth, health, predict, dictionary, translate
 from app.api.websocket import routes as websocket_routes
 from fastapi.staticfiles import StaticFiles
 
@@ -147,6 +147,7 @@ app.include_router(auth.router)
 app.include_router(health.router)
 app.include_router(predict.router)
 app.include_router(dictionary.router)
+app.include_router(translate.router)
 app.include_router(websocket_routes.router)
 
 import os

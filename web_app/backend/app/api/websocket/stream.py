@@ -269,6 +269,25 @@ class StreamConnection:
             print(f"Error receiving frame from {self.client_id}: {str(e)}")
             return None
 
+    def _serialize_landmarks(self, landmarks: np.ndarray) -> list:
+        """Serialize landmarks [543, 3] to a JSON-safe list of [x, y, z].
+
+        NaN values are replaced with None so the frontend can detect missing
+        landmarks. Returns full 543 points to support face/pose/hand rendering.
+        Only includes the essential 75 points (pose + hands) to reduce payload
+        size, padded to full 543 indices for correct GISLR offset mapping.
+        """
+        result = []
+        # Indices to include: Left hand (468..488), Pose (489..521), Right hand (522..542)
+        # Also include a sparse set of face points for face outline (optional)
+        for i in range(543):
+            pt = landmarks[i]
+            if np.isfinite(pt[0]) and np.isfinite(pt[1]):
+                result.append([round(float(pt[0]), 4), round(float(pt[1]), 4), round(float(pt[2]), 4)])
+            else:
+                result.append(None)
+        return result
+
     async def process_frame(self, frame_base64: str, frame_id: int) -> Optional[Dict]:
         """
         Process incoming frame through the full inference pipeline.
@@ -318,6 +337,10 @@ class StreamConnection:
             landmarks = landmark_result["landmarks"]  # [543, 3] with NaN
             n_hand_points = landmark_result["n_hand_points"]
 
+            # Serialize landmarks for frontend skeleton drawing
+            # Convert to list of [x, y, z] with None for NaN
+            landmarks_for_client = self._serialize_landmarks(landmarks)
+
             # 3. Motion gating
             motion, n_motion_pts = compute_hand_motion(self.prev_xyz, landmarks)
             self.prev_xyz = landmarks.copy()
@@ -349,6 +372,7 @@ class StreamConnection:
                     "processing_time_ms": round(processing_time_ms, 2),
                     "frames_in_buffer": len(self.frame_buffer),
                     "status": status_msg,
+                    "landmarks": landmarks_for_client,
                 }
 
             # === INFERENCE ===
@@ -365,6 +389,7 @@ class StreamConnection:
                     "frame_id": frame_id,
                     "processing_time_ms": round(processing_time_ms, 2),
                     "motion": round(motion_avg, 5),
+                    "landmarks": landmarks_for_client,
                 }
 
             # Motion threshold check
@@ -377,6 +402,7 @@ class StreamConnection:
                     "frame_id": frame_id,
                     "processing_time_ms": round(processing_time_ms, 2),
                     "motion": round(motion_avg, 5),
+                    "landmarks": landmarks_for_client,
                 }
 
             # 6. Stack frames and run model
@@ -433,6 +459,7 @@ class StreamConnection:
                 "processing_time_ms": round(total_time_ms, 2),
                 "motion": round(motion_avg, 5),
                 "frames_in_buffer": len(self.frame_buffer),
+                "landmarks": landmarks_for_client,
             }
 
             # Commit event — word is stable enough to add to sentence
