@@ -1,0 +1,184 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 20% 98%;
+    --foreground: 220 25% 10%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 10%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 10%;
+
+    --primary: 174 62% 30%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 20% 94%;
+    --secondary-foreground: 220 25% 15%;
+
+    --muted: 210 15% 93%;
+    --muted-foreground: 220 10% 45%;
+
+    --accent: 235 55% 52%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 18% 87%;
+    --input: 210 18% 87%;
+    --ring: 174 62% 30%;
+
+    --radius: 0.75rem;
+
+    --success: 152 60% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 10%;
+    --info: 210 80% 52%;
+    --info-foreground: 0 0% 100%;
+
+    --confidence-high: 152 60% 40%;
+    --confidence-medium: 38 92% 50%;
+    --confidence-low: 0 72% 51%;
+
+    --surface-elevated: 0 0% 100%;
+    --surface-sunken: 210 20% 96%;
+
+    --sidebar-background: 0 0% 98%;
+    --sidebar-foreground: 240 5.3% 26.1%;
+    --sidebar-primary: 174 62% 30%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-accent: 210 20% 94%;
+    --sidebar-accent-foreground: 220 25% 15%;
+    --sidebar-border: 210 18% 87%;
+    --sidebar-ring: 174 62% 30%;
+
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  .dark,
+  .high-contrast {
+    --background: 220 20% 6%;
+    --foreground: 0 0% 98%;
+
+    --card: 220 20% 10%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 220 20% 10%;
+    --popover-foreground: 0 0% 98%;
+
+    --primary: 174 72% 45%;
+    --primary-foreground: 220 20% 6%;
+
+    --secondary: 220 15% 18%;
+    --secondary-foreground: 0 0% 95%;
+
+    --muted: 220 15% 15%;
+    --muted-foreground: 210 10% 65%;
+
+    --accent: 235 65% 65%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 80% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 15% 22%;
+    --input: 220 15% 22%;
+    --ring: 174 72% 45%;
+
+    --success: 152 70% 50%;
+    --success-foreground: 220 20% 6%;
+    --warning: 38 95% 55%;
+    --warning-foreground: 220 20% 6%;
+    --info: 210 85% 60%;
+    --info-foreground: 220 20% 6%;
+
+    --confidence-high: 152 70% 50%;
+    --confidence-medium: 38 95% 55%;
+    --confidence-low: 0 80% 60%;
+
+    --surface-elevated: 220 20% 12%;
+    --surface-sunken: 220 20% 8%;
+
+    --sidebar-background: 220 20% 8%;
+    --sidebar-foreground: 0 0% 95%;
+    --sidebar-primary: 174 72% 45%;
+    --sidebar-primary-foreground: 220 20% 6%;
+    --sidebar-accent: 220 15% 18%;
+    --sidebar-accent-foreground: 0 0% 95%;
+    --sidebar-border: 220 15% 22%;
+    --sidebar-ring: 174 72% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: var(--font-sans);
+  }
+
+  /* Focus outlines for accessibility */
+  *:focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
+
+  /* Font size scaling */
+  html.font-a { font-size: 16px; }
+  html.font-a-plus { font-size: 18px; }
+  html.font-a-plus-plus { font-size: 20px; }
+}
+
+@layer components {
+  .asl-panel {
+    @apply bg-card rounded-xl border border-border shadow-sm;
+  }
+
+  .asl-panel-header {
+    @apply px-4 py-3 border-b border-border flex items-center justify-between;
+  }
+
+  .asl-panel-body {
+    @apply p-4;
+  }
+
+  .confidence-chip {
+    @apply inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono font-medium;
+  }
+
+  .confidence-high {
+    @apply bg-success/15 text-success;
+  }
+
+  .confidence-medium {
+    @apply bg-warning/15 text-warning;
+  }
+
+  .confidence-low {
+    @apply bg-destructive/15 text-destructive;
+  }
+
+  .touch-target {
+    @apply min-h-[44px] min-w-[44px];
+  }
+
+  .kbd {
+    @apply inline-flex items-center justify-center px-1.5 py-0.5 text-xs font-mono bg-muted rounded border border-border text-muted-foreground;
+  }
+}
+
+@layer utilities {
+  .skeleton-pulse {
+    @apply animate-pulse bg-muted rounded;
+  }
+}
