@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { FPSBadge } from "./FPSBadge";
 import { MotionMeter } from "./MotionMeter";
 import { useRef, useEffect, useCallback, useState } from "react";
+import { useMediaPipeSkeleton } from "@/hooks/useMediaPipeSkeleton";
 
 // ─── MediaPipe Holistic connection definitions (GISLR order) ───────────────
 // Pose connections (33 points, indices 489..521 in GISLR → mapped 0..32 in pose subset)
@@ -34,25 +35,24 @@ const RIGHT_HAND_COLOR = "rgba(76, 175, 255, 0.9)";
 const RIGHT_HAND_POINT_COLOR = "rgba(30, 130, 255, 1)";
 
 // GISLR index offsets
-const FACE_START = 0;
 const LEFT_HAND_START = 468;
 const POSE_START = 489;
 const RIGHT_HAND_START = 522;
 
 /**
  * Draw landmarks and connections on a canvas overlay.
- * landmarks: flat [543 * 3] array or [543][3] from backend (x, y, z normalized 0..1)
+ * landmarks: [543] entries, each [x, y, z] or null (GISLR order, normalized 0..1)
  */
 function drawSkeleton(
   ctx: CanvasRenderingContext2D,
-  landmarks: number[][],
+  landmarks: (number[] | null)[],
   width: number,
   height: number,
 ) {
   ctx.clearRect(0, 0, width, height);
 
   // Helper: check if a landmark is valid (not NaN/null)
-  const isValid = (lm: number[] | undefined): lm is number[] =>
+  const isValid = (lm: number[] | null | undefined): lm is number[] =>
     !!lm && lm.length >= 2 && isFinite(lm[0]) && isFinite(lm[1]);
 
   // Helper: draw connections between landmarks
@@ -70,7 +70,7 @@ function drawSkeleton(
       const b = landmarks[indices[j]];
       if (isValid(a) && isValid(b)) {
         ctx.beginPath();
-        // Mirror X since video is mirrored
+        // Mirror X since video is mirrored with scaleX(-1)
         ctx.moveTo((1 - a[0]) * width, a[1] * height);
         ctx.lineTo((1 - b[0]) * width, b[1] * height);
         ctx.stroke();
@@ -117,7 +117,6 @@ export function CameraCard() {
   const {
     cameraActive, setCameraActive,
     wsConnected, sendFrameViaWebSocket,
-    wsLastPrediction,
   } = useASL();
 
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -125,20 +124,12 @@ export function CameraCard() {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const animFrameRef = useRef<number | null>(null);
   const [videoReady, setVideoReady] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  const landmarksRef = useRef<number[][] | null>(null);
-  const animFrameRef = useRef<number | null>(null);
 
-  // Update landmarks from WebSocket prediction messages
-  useEffect(() => {
-    if (wsLastPrediction?.landmarks) {
-      // Convert null entries to [NaN, NaN, NaN] for the drawing function
-      landmarksRef.current = wsLastPrediction.landmarks.map(
-        (lm) => lm ?? [NaN, NaN, NaN]
-      );
-    }
-  }, [wsLastPrediction]);
+  // ─── Client-side MediaPipe skeleton detection (zero latency) ─────────
+  const skeletonLandmarksRef = useMediaPipeSkeleton(videoRef, cameraActive && videoReady);
 
   // Skeleton drawing loop using requestAnimationFrame
   useEffect(() => {
@@ -162,8 +153,13 @@ export function CameraCard() {
         }
 
         const ctx = overlay.getContext("2d");
-        if (ctx && landmarksRef.current) {
-          drawSkeleton(ctx, landmarksRef.current, overlay.width, overlay.height);
+        if (ctx) {
+          const landmarks = skeletonLandmarksRef.current;
+          if (landmarks) {
+            drawSkeleton(ctx, landmarks.gislr, overlay.width, overlay.height);
+          } else {
+            ctx.clearRect(0, 0, overlay.width, overlay.height);
+          }
         }
       }
       animFrameRef.current = requestAnimationFrame(drawLoop);
@@ -177,7 +173,7 @@ export function CameraCard() {
         animFrameRef.current = null;
       }
     };
-  }, [cameraActive, videoReady]);
+  }, [cameraActive, videoReady, skeletonLandmarksRef]);
 
   // Start camera: get stream, then set cameraActive
   const startCamera = useCallback(async () => {
@@ -238,7 +234,6 @@ export function CameraCard() {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    landmarksRef.current = null;
     // Clear skeleton overlay
     const overlay = overlayCanvasRef.current;
     if (overlay) {
@@ -250,7 +245,7 @@ export function CameraCard() {
     setCameraActive(false);
   }, [setCameraActive]);
 
-  // Frame streaming loop — captures frames and sends via WebSocket
+  // Frame streaming loop — captures frames and sends via WebSocket (for backend inference)
   useEffect(() => {
     if (cameraActive && wsConnected && videoReady) {
       console.log("[Camera] Starting frame streaming at ~10 FPS");
@@ -335,7 +330,7 @@ export function CameraCard() {
               className="absolute inset-0 w-full h-full pointer-events-none"
               style={{ zIndex: 5 }}
             />
-            {/* Hidden canvas for frame capture */}
+            {/* Hidden canvas for frame capture (WebSocket streaming) */}
             <canvas ref={canvasRef} className="hidden" />
             {/* WebSocket status badge */}
             <div className="absolute top-2 right-2 z-10">
