@@ -204,8 +204,8 @@ export default function Index() {
             <Text2SignEditor />
           </div>) :
         mode === "dictionary" ? (
-        /* Dictionary: centered */
-        <div className="max-w-2xl mx-auto">
+        /* Dictionary: full width */
+        <div className="w-full">
             <DictionarySearch />
           </div>) :
         null}

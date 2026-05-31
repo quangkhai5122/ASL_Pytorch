@@ -428,7 +428,7 @@ export function DictionarySearch() {
             </p>
           </div>
           
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3" role="list" aria-label="Dictionary search results">
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3" role="list" aria-label="Dictionary search results">
             {filteredResults.map(entry => (
               <button
                 key={entry.id}
@@ -441,7 +441,7 @@ export function DictionarySearch() {
                     <Hand className="w-6 h-6 text-primary" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-mono font-bold text-base group-hover:text-primary transition-colors truncate">
+                    <p className="font-mono font-bold text-base group-hover:text-primary transition-colors break-all">
                       {entry.gloss.toUpperCase()}
                     </p>
                     <div className="flex items-center gap-2 mt-1">
