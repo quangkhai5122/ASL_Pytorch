@@ -111,11 +111,18 @@ async def websocket_stream(
         HTTPException: If token is invalid
     """
 
-    # Validate token
-    username = decode_token(token)
-    if username is None:
-        await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
-        return
+    # ── Dev bypass — accept fixed token without JWT ──────────────────
+    DEV_BYPASS_TOKEN = "dev-bypass-token-local"
+    if token == DEV_BYPASS_TOKEN:
+        username = "dev_user"
+        print(f"[WS] DEV bypass token accepted → username={username}")
+    else:
+        # Validate real JWT token
+        username = decode_token(token)
+        if username is None:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION, reason="Invalid token")
+            return
+
 
     # Accept connection (use the returned connection object directly)
     try:

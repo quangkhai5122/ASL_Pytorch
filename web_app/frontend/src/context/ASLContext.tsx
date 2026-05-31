@@ -120,9 +120,10 @@ export function ASLProvider({ children }: { children: React.ReactNode }) {
   const auth = useAuth();
   const predictions = usePredictions();
   const webSocket = useWebSocket(
-    auth.isAuthenticated ? apiClient.getToken() : null,
+    auth.isAuthenticated ? (auth.token ?? apiClient.getToken()) : null,
     import.meta.env.VITE_WEBSOCKET_ENABLED !== 'false'
   );
+
 
   // Track previous wsLastPrediction to detect commit events
   const prevPredictionRef = useRef<WebSocketMessage | null>(null);
