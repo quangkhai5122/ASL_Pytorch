@@ -1,7 +1,9 @@
 import os
 import glob
+from pathlib import Path
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 import pandas as pd
 import numpy as np
 
@@ -9,14 +11,16 @@ from app.config import settings
 
 router = APIRouter(prefix=f"{settings.API_V1_STR}/dictionary", tags=["dictionary"])
 
-# The data directory is mounted at /app/data inside docker, or relative in local dev
-DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
-if not os.path.exists(DATA_DIR):
-    # Fallback to local path relative to this file
-    DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../../data"))
+# Resolve project root (ASL_Pytorch/) regardless of working directory
+_PROJECT_ROOT = Path(__file__).resolve().parents[5]  # routes→api→app→backend→web_app→ASL_Pytorch
+
+DATA_DIR = os.environ.get("DATA_DIR", "")
+if not DATA_DIR or not os.path.exists(DATA_DIR):
+    DATA_DIR = str(_PROJECT_ROOT / "data")
 
 VIDEO_DIR = os.path.join(DATA_DIR, "WLASL_Only1Video")
 SKELETON_DIR = os.path.join(DATA_DIR, "WLASL_Skeleton")
+print(f"[Dictionary] DATA_DIR={DATA_DIR}, skeleton exists={os.path.exists(SKELETON_DIR)}")
 
 # =============================================================================
 # Avatar landmark configuration (mirrors scripts/slp_config.py)
@@ -270,3 +274,15 @@ async def get_skeleton(word: str):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error parsing skeleton: {str(e)}")
+
+
+@router.get("/{word}/video")
+async def get_video(word: str):
+    """Stream the MP4 video for a word."""
+    word = word.lower()
+    if os.path.exists(VIDEO_DIR):
+        for filepath in glob.glob(os.path.join(VIDEO_DIR, "**", "*.mp4"), recursive=True):
+            if os.path.splitext(os.path.basename(filepath))[0].lower() == word:
+                return FileResponse(filepath, media_type="video/mp4")
+    raise HTTPException(status_code=404, detail=f"Video for '{word}' not found")
+
