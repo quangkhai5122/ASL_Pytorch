@@ -299,6 +299,15 @@ async def predict_video(
                 pass
 
 
+def _fallback_sentence(signs: list) -> str:
+    """Simple fallback: join signs into readable sentence."""
+    words = [s.lower().replace("_", " ") for s in signs if s]
+    if not words:
+        return ""
+    sentence = " ".join(words)
+    return sentence[0].upper() + sentence[1:] + "."
+
+
 @router.post("/generate-sentence")
 async def generate_sentence(
     request: GenerateSentenceRequest,
@@ -307,6 +316,7 @@ async def generate_sentence(
 ):
     """
     Generate a natural language sentence from a list of recognized signs.
+    Falls back to simple concatenation if Gemini is unavailable or quota exceeded.
     """
     if not request.signs:
         raise HTTPException(
@@ -314,17 +324,23 @@ async def generate_sentence(
             detail="No signs provided",
         )
 
-    if not gemini_service.is_enabled():
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Gemini service is not enabled",
-        )
+    sentence = None
 
-    sentence = gemini_service.generate_sentence(request.signs)
-    if sentence is None:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Sentence generation failed",
-        )
+    # Try Gemini first
+    if gemini_service.is_enabled():
+        try:
+            sentence = gemini_service.generate_sentence(request.signs)
+        except Exception as e:
+            print(f"[GenerateSentence] Gemini failed: {e}")
 
-    return {"sentence": sentence, "signs": request.signs}
+    # Fallback: simple join
+    if not sentence:
+        sentence = _fallback_sentence(request.signs)
+        print(f"[GenerateSentence] Using fallback: {sentence}")
+
+    return {
+        "sentence": sentence,
+        "signs": request.signs,
+        "method": "gemini" if sentence and gemini_service.is_enabled() else "fallback"
+    }
+

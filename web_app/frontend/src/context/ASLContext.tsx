@@ -116,13 +116,18 @@ export function ASLProvider({ children }: { children: React.ReactNode }) {
   const [backendStats, setBackendStats] = useState<BackendStats | null>(null);
   const [backendLoading, setBackendLoading] = useState(true);
 
-  // Backend hooks
+  // ── Dev: seed token into localStorage so axios interceptor sends it ──
   const auth = useAuth();
+  React.useEffect(() => {
+    if (auth.token) apiClient.setToken(auth.token);
+  }, [auth.token]);
+
   const predictions = usePredictions();
   const webSocket = useWebSocket(
     auth.isAuthenticated ? (auth.token ?? apiClient.getToken()) : null,
     import.meta.env.VITE_WEBSOCKET_ENABLED !== 'false'
   );
+
 
 
   // Track previous wsLastPrediction to detect commit events

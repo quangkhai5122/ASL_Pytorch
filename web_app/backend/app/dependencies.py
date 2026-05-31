@@ -20,27 +20,23 @@ async def get_current_user(
 ) -> str:
     """
     Verify JWT token and return current user.
-
-    Args:
-        credentials: HTTP Bearer credentials
-
-    Returns:
-        Username from token
-
-    Raises:
-        HTTPException: If token is invalid or expired
+    Accepts DEV_BYPASS_TOKEN for local development (no real JWT needed).
     """
     token = credentials.credentials
-    username = decode_token(token)
 
+    # ── Dev bypass ──────────────────────────────────────────────────
+    if token == "dev-bypass-token-local":
+        return "dev_user"
+
+    username = decode_token(token)
     if username is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-
     return username
+
 
 
 async def get_optional_user(
