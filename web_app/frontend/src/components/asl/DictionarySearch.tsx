@@ -215,7 +215,7 @@ export function DictionarySearch() {
                     <video 
                       ref={videoRef}
                       key={selectedEntry.gloss}
-                      src={`http://localhost:8000/api/v1/videos/${encodeURIComponent(selectedEntry.gloss)}.mp4`}
+                      src={`http://localhost:8000/api/v1/dictionary/${encodeURIComponent(selectedEntry.gloss)}/video`}
                       className="w-full h-full object-contain"
                       muted
                       loop={isLooping}

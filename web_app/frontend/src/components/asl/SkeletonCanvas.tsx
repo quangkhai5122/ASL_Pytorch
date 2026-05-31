@@ -19,7 +19,7 @@
  */
 
 import {
-  useEffect, useRef, useCallback, useState,
+  useEffect, useRef, useCallback, useState, useMemo,
   forwardRef, useImperativeHandle,
 } from "react";
 
@@ -305,10 +305,14 @@ export const SkeletonCanvas = forwardRef<SkeletonCanvasHandle, SkeletonCanvasPro
     const playing = playingProp ?? isPlaying ?? false;
     const speed   = speedProp   ?? playbackSpeed ?? 1;
 
-    // Build unified frames array from whichever source was provided
-    const frames: Frame[] = framesData
-      ? framesData.map(richToFrame)
-      : (rawFrames ?? []) as Frame[];
+    // Build unified frames — useMemo so reference only changes when data changes,
+    // NOT on every parent re-render. Without this, frames gets a new array ref
+    // every render (because .map() creates new array), which triggers the
+    // "reset when frames change" useEffect on every frame → animation stuck at 0.
+    const frames: Frame[] = useMemo(() => {
+      if (framesData) return framesData.map(richToFrame);
+      return (rawFrames ?? []) as Frame[];
+    }, [framesData, rawFrames]);
     const canvasRef    = useRef<HTMLCanvasElement>(null);
     const frameIdxRef  = useRef(0);
     const rafRef       = useRef<number | null>(null);
