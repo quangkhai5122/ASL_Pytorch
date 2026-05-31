@@ -54,6 +54,10 @@ class GeminiService:
         """
         Generate a natural language sentence from a sequence of signs.
 
+        Uses the same prompt structure as the desktop app (app_optimized.py)
+        which has been proven to produce coherent English sentences from
+        ASL gloss word lists.
+
         Args:
             signs: List of recognized signs/words
 
@@ -67,15 +71,19 @@ class GeminiService:
             return None
 
         try:
-            # Create prompt
-            signs_str = " ".join(signs)
-            prompt = f"""Given a sequence of sign language words, generate a natural, grammatically correct English sentence:
+            # Use the proven prompt from the desktop application
+            prompt = f"""
+            Objective:
+            Construct a coherent and meaningful English sentence from a list of recognized American Sign Language (ASL) words. The sentence should be simple and accurately convey the meaning.
 
-Signs: {signs_str}
+            Instructions:
+            - Input: A Python list of recognized ASL words.
+            - Processing: Rearrange the words (if necessary) to form a grammatically correct sentence. Add necessary articles, prepositions, conjunctions, and auxiliary verbs. Ignore the word "TV" if present.
+            - Output: A concise English sentence. Return ONLY the sentence, nothing else.
 
-Please generate a coherent English sentence that represents these signs. If the signs form a complete thought, maintain the original meaning. Be concise and natural.
-
-Response should be ONLY the sentence, nothing else."""
+            Input: {signs}
+            Output:
+            """
 
             # Get model and generate
             model = genai.GenerativeModel(settings.GEMINI_MODEL)
@@ -87,9 +95,15 @@ Response should be ONLY the sentence, nothing else."""
                 ),
             )
 
-            sentence = response.text.strip()
-            print(f"[OK] Generated sentence: {sentence}")
-            return sentence
+            if getattr(response, 'text', None):
+                sentence = response.text.strip()
+                print(f"[OK] Generated sentence: {sentence}")
+                return sentence
+
+            # Fallback if empty response
+            fallback = " ".join(signs)
+            print(f"[WARN] Empty Gemini response, using fallback: {fallback}")
+            return fallback
 
         except Exception as e:
             print(f"[WARN] Gemini generation failed: {str(e)}")
