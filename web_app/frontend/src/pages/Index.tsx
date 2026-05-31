@@ -180,12 +180,7 @@ export default function Index() {
               <div className="grid h-[250px] grid-cols-1 gap-3 md:grid-cols-[1fr_2fr]">
                 <StatusPanel />
                 <div className="min-h-0">
-                  {mode === "manual" ?
-                <PredictionsList /> :
-                <>
-                      <WordBuffer />
-                    </>
-                }
+                  {mode === "manual" ? <PredictionsList /> : <WordBuffer />}
                 </div>
               </div>
 
