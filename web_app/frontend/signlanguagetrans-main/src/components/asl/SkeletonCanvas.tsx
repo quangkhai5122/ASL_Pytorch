@@ -1,375 +1,356 @@
-/**
- * SkeletonCanvas.tsx
- *
- * Render skeleton animation (T × 153 × 3) lên HTML5 Canvas.
- * Giống SignVideoPlayerPIL (PIL version) — vẽ bằng Canvas 2D API.
- *
- * Expose qua forwardRef:
- *   - seekToFrame(idx)   — seek tới frame cụ thể
- *   - captureFramePNG(idx) — render 1 frame thành PNG blob (cho Frames export)
- *
- * Landmark layout 153 points (từ slp_config.py):
- *   [0:40]    Lips (40)
- *   [40:76]   Face oval (36)
- *   [76:86]   Eyebrows (10)
- *   [86:102]  Eyes (16)
- *   [102:123] Left hand (21)
- *   [123:132] Pose: Nose, L/R Shoulder, L/R Elbow, L/R Wrist, L/R Hip (9)
- *   [132:153] Right hand (21)
- */
+import { useEffect, useRef, useCallback } from "react";
 
-import {
-  useEffect, useRef, useCallback, useState,
-  forwardRef, useImperativeHandle,
-} from "react";
+// =============================================================================
+// Rich frame data from the backend (153 landmarks, segmented)
+// =============================================================================
+export type RichFrameData = {
+  frame: number;
+  lips: number[][];       // 40 × [x, y]
+  oval: number[][];       // 36 × [x, y]
+  eyebrows: number[][];   // 10 × [x, y]
+  eyes: number[][];       // 16 × [x, y]
+  left_hand: number[][];  // 21 × [x, y]
+  pose: number[][];       // 9 × [x, y]
+  right_hand: number[][]; // 21 × [x, y]
+  hand_valid: { left: boolean; right: boolean };
+};
 
-// ---------------------------------------------------------------------------
-// Index constants  (mirror slp_config.py)
-// ---------------------------------------------------------------------------
+type Props = {
+  framesData: RichFrameData[];
+  fps?: number;
+  isPlaying?: boolean;
+  playbackSpeed?: number;
+  currentFrame?: number;
+  onFrameUpdate?: (frame: number) => void;
+};
 
-function range(start: number, end: number): number[] {
-  return Array.from({ length: end - start }, (_, i) => i + start);
-}
+// =============================================================================
+// Constants — mirrors scripts/slp_config.py
+// =============================================================================
 
-const IDX_LIPS       = range(0, 40);
-const IDX_FACE_OVAL  = range(40, 76);
-const IDX_EYEBROWS   = range(76, 86);
-const IDX_EYES       = range(86, 102);
-const IDX_LEFT_HAND  = range(102, 123);
-const IDX_POSE       = range(123, 132);
-const IDX_RIGHT_HAND = range(132, 153);
-
-// Local eye/eyebrow splits
-const IDX_LEFT_EYE_LOCAL        = range(0, 8);
-const IDX_RIGHT_EYE_LOCAL       = range(8, 16);
-const IDX_LEFT_EYEBROW_LOCAL    = range(0, 5);
-const IDX_RIGHT_EYEBROW_LOCAL   = range(5, 10);
-
-// Pose connections (absolute global indices)
-const POSE_CONNECTIONS: [number, number][] = [
-  [IDX_POSE[1], IDX_POSE[2]],  // L_Shoulder — R_Shoulder
-  [IDX_POSE[1], IDX_POSE[3]],  // L_Shoulder — L_Elbow
-  [IDX_POSE[3], IDX_POSE[5]],  // L_Elbow    — L_Wrist
-  [IDX_POSE[2], IDX_POSE[4]],  // R_Shoulder — R_Elbow
-  [IDX_POSE[4], IDX_POSE[6]],  // R_Elbow    — R_Wrist
-  [IDX_POSE[1], IDX_POSE[7]],  // L_Shoulder — L_Hip
-  [IDX_POSE[2], IDX_POSE[8]],  // R_Shoulder — R_Hip
-  [IDX_POSE[7], IDX_POSE[8]],  // L_Hip      — R_Hip
+// Pose order: [Nose(0), LShoulder(1), RShoulder(2), LElbow(3), RElbow(4),
+//              LWrist(5), RWrist(6), LHip(7), RHip(8)]
+const POSE_BONES: [number, number][] = [
+  [1, 2],  // shoulders
+  [1, 3],  // L shoulder → L elbow
+  [3, 5],  // L elbow → L wrist
+  [2, 4],  // R shoulder → R elbow
+  [4, 6],  // R elbow → R wrist
+  [1, 7],  // L shoulder → L hip
+  [2, 8],  // R shoulder → R hip
+  [7, 8],  // hips
 ];
 
-const POSE_HAND_CONNECTIONS: [number, number][] = [
-  [IDX_POSE[5], IDX_LEFT_HAND[0]],   // L_Wrist → Left  hand wrist
-  [IDX_POSE[6], IDX_RIGHT_HAND[0]],  // R_Wrist → Right hand wrist
+// Hand finger chains (local indices 0-20 within each hand)
+const FINGER_CHAINS = [
+  [0, 1, 2, 3, 4],       // Thumb
+  [0, 5, 6, 7, 8],       // Index
+  [0, 9, 10, 11, 12],    // Middle
+  [0, 13, 14, 15, 16],   // Ring
+  [0, 17, 18, 19, 20],   // Pinky
 ];
 
-// Finger chains (local indices 0–20, same HAND_FINGER_CHAINS in slp_config)
-const HAND_FINGER_CHAINS: number[][] = [
-  [0, 1, 2, 3, 4],     // Thumb
-  [0, 5, 6, 7, 8],     // Index
-  [0, 9, 10, 11, 12],  // Middle
-  [0, 13, 14, 15, 16], // Ring
-  [0, 17, 18, 19, 20], // Pinky
-];
+const FINGER_COLORS = ["#DDDD00", "#00DD00", "#00DDDD", "#4466FF", "#DD00DD"];
 
-// Same as FINGER_COLORS_RGB in sign_video_player_pil.py
-const FINGER_COLORS: string[] = [
-  "#ff0000",  // Thumb  — red
-  "#ffa500",  // Index  — orange
-  "#00cc00",  // Middle — green
-  "#0000ff",  // Ring   — blue
-  "#800080",  // Pinky  — purple
-];
+// Face sub-split: eyebrows 5+5, eyes 8+8
+const LEFT_EYEBROW_COUNT = 5;
+const LEFT_EYE_COUNT = 8;
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // Drawing helpers
-// ---------------------------------------------------------------------------
+// =============================================================================
 
-type Pt = number[];  // [x, y, z]
-type Frame = Pt[];   // 153 points
-
-function isInvalidPt(pt: Pt): boolean {
-  return !pt || isNaN(pt[0]) || isNaN(pt[1]) ||
-    (Math.abs(pt[0]) < 1e-9 && Math.abs(pt[1]) < 1e-9);
-}
-
-function isInvalid(pts: Pt[]): boolean {
-  if (!pts || pts.length === 0) return true;
-  return pts.every(p => isNaN(p[0]) || isNaN(p[1])) ||
-    pts.every(p => Math.abs(p[0]) < 1e-9 && Math.abs(p[1]) < 1e-9);
-}
-
-function isHandValid(frame: Frame, indices: number[]): boolean {
-  const pts = indices.map(i => frame[i]);
-  if (!pts[0] || isInvalidPt(pts[0])) return false;
-  if (isInvalid(pts)) return false;
-  const [fx, fy] = pts[0];
-  return pts.some(p => Math.abs(p[0] - fx) > 1e-6 || Math.abs(p[1] - fy) > 1e-6);
-}
-
-/** Normalized 0–1 → pixel, with 10% margin like _to_pixel() in PIL player */
-function toPixel(x: number, y: number, W: number, H: number): [number, number] {
-  const m = 0.1;
-  return [
-    Math.round((x + m) * W / (1 + 2 * m)),
-    Math.round((y + m) * H / (1 + 2 * m)),
-  ];
-}
-
-function drawLine(
-  ctx: CanvasRenderingContext2D, p1: Pt, p2: Pt,
-  W: number, H: number, color: string, lw: number
+function drawClosedLoop(
+  ctx: CanvasRenderingContext2D,
+  pts: number[][],
+  color: string,
+  lineWidth: number,
+  w: number,
+  h: number
 ) {
-  if (isInvalidPt(p1) || isInvalidPt(p2)) return;
-  const [x1, y1] = toPixel(p1[0], p1[1], W, H);
-  const [x2, y2] = toPixel(p2[0], p2[1], W, H);
-  ctx.strokeStyle = color; ctx.lineWidth = lw;
-  ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
-}
-
-function drawPolyline(
-  ctx: CanvasRenderingContext2D, pts: Pt[],
-  W: number, H: number, color: string, lw: number, closed = false
-) {
-  const valid = pts.filter(p => !isInvalidPt(p));
-  if (valid.length < 2) return;
-  ctx.strokeStyle = color; ctx.lineWidth = lw;
+  if (pts.length < 2) return;
   ctx.beginPath();
-  const [sx, sy] = toPixel(valid[0][0], valid[0][1], W, H);
-  ctx.moveTo(sx, sy);
-  for (let i = 1; i < valid.length; i++) {
-    const [px, py] = toPixel(valid[i][0], valid[i][1], W, H);
-    ctx.lineTo(px, py);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = "round";
+  ctx.moveTo(pts[0][0] * w, pts[0][1] * h);
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(pts[i][0] * w, pts[i][1] * h);
   }
-  if (closed) ctx.closePath();
+  ctx.closePath();
   ctx.stroke();
 }
 
-// ---------------------------------------------------------------------------
-// Core draw function — mirrors _draw_frame in SignVideoPlayerPIL
-// ---------------------------------------------------------------------------
-
-function drawFrame(ctx: CanvasRenderingContext2D, frame: Frame, W: number, H: number) {
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = "#ffffff";
-  ctx.fillRect(0, 0, W, H);
-
-  const fc = "#8b0000"; // darkred — face
-
-  // ── Face ─────────────────────────────────────────────
-  // Face Oval (closed polygon)
-  drawPolyline(ctx, IDX_FACE_OVAL.map(i => frame[i]), W, H, fc, 2, true);
-  // Lips (closed)
-  drawPolyline(ctx, IDX_LIPS.map(i => frame[i]),      W, H, fc, 2, true);
-  // Eyebrows
-  const eb = IDX_EYEBROWS.map(i => frame[i]);
-  if (!isInvalid(eb)) {
-    drawPolyline(ctx, IDX_LEFT_EYEBROW_LOCAL.map(i => eb[i]),  W, H, fc, 2);
-    drawPolyline(ctx, IDX_RIGHT_EYEBROW_LOCAL.map(i => eb[i]), W, H, fc, 2);
+function drawOpenPath(
+  ctx: CanvasRenderingContext2D,
+  pts: number[][],
+  color: string,
+  lineWidth: number,
+  w: number,
+  h: number
+) {
+  if (pts.length < 2) return;
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  ctx.moveTo(pts[0][0] * w, pts[0][1] * h);
+  for (let i = 1; i < pts.length; i++) {
+    ctx.lineTo(pts[i][0] * w, pts[i][1] * h);
   }
-  // Eyes (closed)
-  const ey = IDX_EYES.map(i => frame[i]);
-  if (!isInvalid(ey)) {
-    drawPolyline(ctx, IDX_LEFT_EYE_LOCAL.map(i => ey[i]),  W, H, fc, 2, true);
-    drawPolyline(ctx, IDX_RIGHT_EYE_LOCAL.map(i => ey[i]), W, H, fc, 2, true);
-  }
-
-  // ── Pose skeleton ─────────────────────────────────────
-  const pc = "#ff0000"; // red
-  const lhv = isHandValid(frame, IDX_LEFT_HAND);
-  const rhv = isHandValid(frame, IDX_RIGHT_HAND);
-
-  for (const [i1, i2] of POSE_CONNECTIONS) {
-    drawLine(ctx, frame[i1], frame[i2], W, H, pc, 3);
-  }
-  for (const [i1, i2] of POSE_HAND_CONNECTIONS) {
-    if (i2 === IDX_LEFT_HAND[0]  && !lhv) continue;
-    if (i2 === IDX_RIGHT_HAND[0] && !rhv) continue;
-    drawLine(ctx, frame[i1], frame[i2], W, H, pc, 3);
-  }
-
-  // ── Hands ────────────────────────────────────────────
-  const drawHand = (indices: number[]) => {
-    if (!isHandValid(frame, indices)) return;
-    const pts = indices.map(i => frame[i]);
-    HAND_FINGER_CHAINS.forEach((chain, fi) =>
-      drawPolyline(ctx, chain.map(j => pts[j]), W, H, FINGER_COLORS[fi], 2)
-    );
-  };
-  drawHand(IDX_LEFT_HAND);
-  drawHand(IDX_RIGHT_HAND);
+  ctx.stroke();
 }
 
-// ---------------------------------------------------------------------------
-// Public handle
-// ---------------------------------------------------------------------------
-
-export interface SkeletonCanvasHandle {
-  seekToFrame: (idx: number) => void;
-  captureFramePNG: (idx: number) => Promise<Blob | null>;
-  captureAllFramesPNG: (onProgress?: (i: number, total: number) => void) => Promise<Blob[]>;
-  getCurrentFrame: () => number;
+function drawLine(
+  ctx: CanvasRenderingContext2D,
+  p1: number[],
+  p2: number[],
+  color: string,
+  lineWidth: number,
+  w: number,
+  h: number
+) {
+  ctx.beginPath();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = "round";
+  ctx.moveTo(p1[0] * w, p1[1] * h);
+  ctx.lineTo(p2[0] * w, p2[1] * h);
+  ctx.stroke();
 }
 
-// ---------------------------------------------------------------------------
-// Props
-// ---------------------------------------------------------------------------
+function drawGlowDot(
+  ctx: CanvasRenderingContext2D,
+  pt: number[],
+  radius: number,
+  color: string,
+  w: number,
+  h: number
+) {
+  const x = pt[0] * w;
+  const y = pt[1] * h;
 
-export interface SkeletonCanvasProps {
-  frames: number[][][];   // (T, 153, 3)
-  fps?: number;
-  playing?: boolean;
-  speed?: number;
-  loop?: boolean;
-  onFrameChange?: (frame: number, total: number) => void;
-  onPlayEnd?: () => void;
+  // Glow
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, radius * 2.5);
+  grad.addColorStop(0, color);
+  grad.addColorStop(1, "transparent");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, radius * 2.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Solid center
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-// ---------------------------------------------------------------------------
+// =============================================================================
 // Component
-// ---------------------------------------------------------------------------
+// =============================================================================
 
-export const SkeletonCanvas = forwardRef<SkeletonCanvasHandle, SkeletonCanvasProps>(
-  function SkeletonCanvas(
-    { frames, fps = 25, playing = false, speed = 1, loop = true, onFrameChange, onPlayEnd },
-    ref
-  ) {
-    const canvasRef    = useRef<HTMLCanvasElement>(null);
-    const frameIdxRef  = useRef(0);
-    const rafRef       = useRef<number | null>(null);
-    const lastTimeRef  = useRef<number>(0);
-    const [, forceRender] = useState(0); // triggers re-render for frame counter
+export function SkeletonCanvas({
+  framesData,
+  fps = 20,
+  isPlaying = true,
+  playbackSpeed = 1,
+  currentFrame = 0,
+  onFrameUpdate,
+}: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const animRef = useRef<number>(0);
+  const lastTimeRef = useRef<number>(0);
 
-    const totalFrames  = frames.length;
-    const CANVAS_W     = 480;
-    const CANVAS_H     = 480;
+  const totalFrames = framesData.length;
 
-    // ── Draw a single frame ──────────────────────────────
-    const renderFrame = useCallback((idx: number) => {
+  // ── Render a single frame ──
+  const renderFrame = useCallback(
+    (frameIdx: number) => {
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
-      if (frames[idx]) {
-        drawFrame(ctx, frames[idx] as Frame, CANVAS_W, CANVAS_H);
-      }
-    }, [frames]);
 
-    // ── Placeholder when no frames ───────────────────────
-    const renderPlaceholder = useCallback(() => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
-      ctx.fillStyle = "#f8f8f8";
-      ctx.fillRect(0, 0, CANVAS_W, CANVAS_H);
-      ctx.fillStyle = "#aaa";
-      ctx.font = "14px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText("No animation loaded", CANVAS_W / 2, CANVAS_H / 2);
-    }, []);
+      const w = canvas.width;
+      const h = canvas.height;
+      const frame = framesData[frameIdx % totalFrames];
 
-    // ── Reset when frames change ─────────────────────────
-    useEffect(() => {
-      frameIdxRef.current = 0;
-      forceRender(n => n + 1);
-      if (frames.length > 0) renderFrame(0);
-      else renderPlaceholder();
-    }, [frames, renderFrame, renderPlaceholder]);
+      // Clear + dark background
+      ctx.fillStyle = "#0a0a12";
+      ctx.fillRect(0, 0, w, h);
 
-    // ── Animation loop ───────────────────────────────────
-    useEffect(() => {
-      if (!playing || totalFrames === 0) {
-        if (rafRef.current) cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-        return;
+      // Subtle grid lines
+      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= 10; i++) {
+        const x = (i / 10) * w;
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke();
+        const y = (i / 10) * h;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
       }
 
-      const msPerFrame = (1000 / fps) / speed;
+      // ── 1. Face ──
+      const faceColor = "rgba(180, 140, 140, 0.5)";
+      const lipsColor = "rgba(220, 160, 160, 0.7)";
+      const faceLineWidth = 1.5;
 
-      const tick = (ts: number) => {
-        if (ts - lastTimeRef.current >= msPerFrame) {
-          lastTimeRef.current = ts;
-          const idx = frameIdxRef.current;
-          renderFrame(idx);
-          onFrameChange?.(idx, totalFrames);
-          forceRender(n => n + 1);
+      // Face oval (closed loop)
+      drawClosedLoop(ctx, frame.oval, faceColor, faceLineWidth, w, h);
 
-          let next = idx + 1;
-          if (next >= totalFrames) {
-            if (loop) next = 0;
-            else { onPlayEnd?.(); return; }
-          }
-          frameIdxRef.current = next;
+      // Lips (closed loop)
+      drawClosedLoop(ctx, frame.lips, lipsColor, faceLineWidth + 0.5, w, h);
+
+      // Eyebrows (2 separate open arcs)
+      const leftBrow = frame.eyebrows.slice(0, LEFT_EYEBROW_COUNT);
+      const rightBrow = frame.eyebrows.slice(LEFT_EYEBROW_COUNT);
+      drawOpenPath(ctx, leftBrow, faceColor, faceLineWidth, w, h);
+      drawOpenPath(ctx, rightBrow, faceColor, faceLineWidth, w, h);
+
+      // Eyes (2 closed loops)
+      const leftEye = frame.eyes.slice(0, LEFT_EYE_COUNT);
+      const rightEye = frame.eyes.slice(LEFT_EYE_COUNT);
+      drawClosedLoop(ctx, leftEye, faceColor, faceLineWidth, w, h);
+      drawClosedLoop(ctx, rightEye, faceColor, faceLineWidth, w, h);
+
+      // ── 2. Pose skeleton ──
+      const poseColor = "#38bdf8"; // sky blue
+      const poseLW = 3;
+
+      for (const [a, b] of POSE_BONES) {
+        const p1 = frame.pose[a];
+        const p2 = frame.pose[b];
+        if (p1 && p2) {
+          drawLine(ctx, p1, p2, poseColor, poseLW, w, h);
         }
-        rafRef.current = requestAnimationFrame(tick);
+      }
+
+      // Pose-to-hand connections (wrist → hand wrist)
+      if (frame.hand_valid.left) {
+        const poseWrist = frame.pose[5]; // L_Wrist
+        const handWrist = frame.left_hand[0];
+        if (poseWrist && handWrist) {
+          drawLine(ctx, poseWrist, handWrist, poseColor, poseLW, w, h);
+        }
+      }
+      if (frame.hand_valid.right) {
+        const poseWrist = frame.pose[6]; // R_Wrist
+        const handWrist = frame.right_hand[0];
+        if (poseWrist && handWrist) {
+          drawLine(ctx, poseWrist, handWrist, poseColor, poseLW, w, h);
+        }
+      }
+
+      // Nose → neck midpoint
+      const nose = frame.pose[0];
+      const lShoulder = frame.pose[1];
+      const rShoulder = frame.pose[2];
+      if (nose && lShoulder && rShoulder) {
+        const neck = [(lShoulder[0] + rShoulder[0]) / 2, (lShoulder[1] + rShoulder[1]) / 2];
+        drawLine(ctx, nose, neck, poseColor, poseLW, w, h);
+      }
+
+      // Pose joint dots with glow
+      for (let i = 0; i < frame.pose.length; i++) {
+        const pt = frame.pose[i];
+        if (pt) {
+          const r = i === 0 ? 6 : 4; // Nose bigger
+          drawGlowDot(ctx, pt, r, poseColor, w, h);
+        }
+      }
+
+      // ── 3. Hands ──
+      const drawHand = (handPts: number[][], valid: boolean) => {
+        if (!valid) return;
+        for (let fi = 0; fi < FINGER_CHAINS.length; fi++) {
+          const chain = FINGER_CHAINS[fi];
+          const color = FINGER_COLORS[fi];
+          const chainPts = chain.map((idx) => handPts[idx]).filter(Boolean);
+          if (chainPts.length >= 2) {
+            drawOpenPath(ctx, chainPts, color, 2.5, w, h);
+          }
+        }
+        // Fingertip dots
+        for (const pt of handPts) {
+          if (pt) {
+            drawGlowDot(ctx, pt, 2.5, "rgba(255,255,255,0.7)", w, h);
+          }
+        }
       };
 
+      drawHand(frame.left_hand, frame.hand_valid.left);
+      drawHand(frame.right_hand, frame.hand_valid.right);
+    },
+    [framesData, totalFrames]
+  );
+
+  // ── Animation loop ──
+  const animate = useCallback(
+    (timestamp: number) => {
+      if (!isPlaying || totalFrames === 0) return;
+
+      if (lastTimeRef.current === 0) {
+        lastTimeRef.current = timestamp;
+      }
+
+      const elapsed = timestamp - lastTimeRef.current;
+      const interval = (1000 / fps) / playbackSpeed;
+
+      if (elapsed >= interval) {
+        lastTimeRef.current = timestamp;
+        const nextFrame = (currentFrame + 1) % totalFrames;
+        onFrameUpdate?.(nextFrame);
+      }
+
+      renderFrame(currentFrame);
+      animRef.current = requestAnimationFrame(animate);
+    },
+    [isPlaying, totalFrames, fps, playbackSpeed, currentFrame, onFrameUpdate, renderFrame]
+  );
+
+  // Start/stop animation
+  useEffect(() => {
+    if (isPlaying && totalFrames > 0) {
       lastTimeRef.current = 0;
-      rafRef.current = requestAnimationFrame(tick);
-      return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-    }, [playing, fps, speed, totalFrames, loop, renderFrame, onFrameChange, onPlayEnd]);
+      animRef.current = requestAnimationFrame(animate);
+    } else {
+      // Render current frame when paused
+      renderFrame(currentFrame);
+    }
+    return () => {
+      if (animRef.current) cancelAnimationFrame(animRef.current);
+    };
+  }, [isPlaying, animate, totalFrames, currentFrame, renderFrame]);
 
-    // ── Render when paused & seeked ──────────────────────
-    useEffect(() => {
-      if (!playing && frames.length > 0) renderFrame(frameIdxRef.current);
-    }, [playing, frames, renderFrame]);
+  // ── Resize canvas to match container ──
+  useEffect(() => {
+    const resize = () => {
+      const container = containerRef.current;
+      const canvas = canvasRef.current;
+      if (!container || !canvas) return;
+      const dpr = window.devicePixelRatio || 1;
+      const rect = container.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      const ctx = canvas.getContext("2d");
+      if (ctx) ctx.scale(dpr, dpr);
+      // Re-render after resize (use logical size)
+      canvas.width = rect.width * dpr;
+      canvas.height = rect.height * dpr;
+      renderFrame(currentFrame);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [currentFrame, renderFrame]);
 
-    // ── Imperative handle ────────────────────────────────
-    useImperativeHandle(ref, () => ({
-      seekToFrame(idx: number) {
-        if (!frames.length) return;
-        const clamped = Math.max(0, Math.min(idx, frames.length - 1));
-        frameIdxRef.current = clamped;
-        renderFrame(clamped);
-        forceRender(n => n + 1);
-      },
-
-      async captureFramePNG(idx: number): Promise<Blob | null> {
-        if (!frames[idx]) return null;
-        const offscreen = document.createElement("canvas");
-        offscreen.width  = CANVAS_W;
-        offscreen.height = CANVAS_H;
-        const ctx = offscreen.getContext("2d");
-        if (!ctx) return null;
-        drawFrame(ctx, frames[idx] as Frame, CANVAS_W, CANVAS_H);
-        return new Promise(resolve => offscreen.toBlob(resolve, "image/png"));
-      },
-
-      async captureAllFramesPNG(
-        onProgress?: (i: number, total: number) => void
-      ): Promise<Blob[]> {
-        const blobs: Blob[] = [];
-        const offscreen = document.createElement("canvas");
-        offscreen.width  = CANVAS_W;
-        offscreen.height = CANVAS_H;
-        const ctx = offscreen.getContext("2d")!;
-        for (let i = 0; i < frames.length; i++) {
-          drawFrame(ctx, frames[i] as Frame, CANVAS_W, CANVAS_H);
-          const blob: Blob | null = await new Promise(r => offscreen.toBlob(r, "image/png"));
-          if (blob) blobs.push(blob);
-          onProgress?.(i + 1, frames.length);
-          // yield to keep UI responsive
-          if (i % 10 === 0) await new Promise(r => setTimeout(r, 0));
-        }
-        return blobs;
-      },
-
-      getCurrentFrame() {
-        return frameIdxRef.current;
-      },
-    }), [frames, renderFrame]);
-
-    // ── Render ───────────────────────────────────────────
-    return (
-      <canvas
-        ref={canvasRef}
-        width={CANVAS_W}
-        height={CANVAS_H}
-        className="w-full h-full object-contain"
-        style={{ background: "#ffffff", display: "block" }}
-        aria-label={`ASL skeleton animation — frame ${frameIdxRef.current + 1} of ${totalFrames}`}
-      />
-    );
-  }
-);
+  return (
+    <div ref={containerRef} className="w-full h-full relative">
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full rounded-xl" />
+    </div>
+  );
+}
