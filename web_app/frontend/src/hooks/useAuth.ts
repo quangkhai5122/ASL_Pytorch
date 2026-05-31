@@ -1,5 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
-import { authService } from '@/services/auth';
+import { useState, useCallback } from 'react';
 
 export interface UseAuthReturn {
   isAuthenticated: boolean;
@@ -12,76 +11,26 @@ export interface UseAuthReturn {
 }
 
 /**
- * Hook for authentication management
+ * Auth bypass for local development.
+ * isAuthenticated = true by default → no login screen.
  */
 export function useAuth(): UseAuthReturn {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [username, setUsername] = useState<string | null>(null);
+  const [username, setUsername] = useState<string | null>("user");
 
-  // Check if already authenticated on mount
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        if (authService.isAuthenticated()) {
-          const tokenData = await authService.verifyToken();
-          setIsAuthenticated(true);
-          setUsername(tokenData.username);
-        } else {
-          setIsAuthenticated(false);
-        }
-      } catch (err) {
-        setIsAuthenticated(false);
-        console.log('User not authenticated');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    checkAuth();
-  }, []);
-
-  const login = useCallback(async (user: string, pass: string) => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await authService.login(user, pass);
-      setIsAuthenticated(true);
-      setUsername(user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Login failed');
-      setIsAuthenticated(false);
-    } finally {
-      setIsLoading(false);
-    }
+  const login = useCallback(async (user: string, _pass: string) => {
+    setIsAuthenticated(true);
+    setUsername(user);
   }, []);
 
   const logout = useCallback(async () => {
-    setIsLoading(true);
-    try {
-      await authService.logout();
-      setIsAuthenticated(false);
-      setUsername(null);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Logout failed');
-    } finally {
-      setIsLoading(false);
-    }
+    setIsAuthenticated(false);
+    setUsername(null);
   }, []);
 
-  const clearError = useCallback(() => {
-    setError(null);
-  }, []);
+  const clearError = useCallback(() => setError(null), []);
 
-  return {
-    isAuthenticated,
-    isLoading,
-    error,
-    username,
-    login,
-    logout,
-    clearError,
-  };
+  return { isAuthenticated, isLoading, error, username, login, logout, clearError };
 }
