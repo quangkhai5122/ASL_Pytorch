@@ -380,12 +380,13 @@ class StreamConnection:
             self.last_infer_time = now
 
             # Hand presence check
+            print(f"[DEBUG] frame={frame_id} n_hand_points={n_hand_points} motion={motion_avg:.5f} buffer={len(self.frame_buffer)}")
             if n_hand_points < settings.MIN_HAND_POINTS:
                 self.prediction_state["status"] = "no_hands"
                 return {
                     "type": "status",
                     "status": "no_hands",
-                    "message": "No hands detected",
+                    "message": f"No hands detected (points={n_hand_points}/{settings.MIN_HAND_POINTS})",
                     "frame_id": frame_id,
                     "processing_time_ms": round(processing_time_ms, 2),
                     "motion": round(motion_avg, 5),
