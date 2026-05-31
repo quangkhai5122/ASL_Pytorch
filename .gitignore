@@ -15,4 +15,5 @@ frontend/
 
 .md
 .bat
-.sh
+.sh.DS_Store
+**/.DS_Store
