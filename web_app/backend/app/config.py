@@ -62,7 +62,7 @@ class Settings(BaseSettings):
     STABILITY_N: int = 3  # Stable predictions needed to commit
     PROB_EMA_ALPHA: float = 0.55  # Probability smoothing (0-1, higher=smoother)
     MOVEMENT_THRESHOLD: float = 0.003  # Motion gate threshold
-    MIN_HAND_POINTS: int = 1  # Minimum detected hand points (lowered to fix dropouts)
+    MIN_HAND_POINTS: int = 4  # Minimum detected hand points
 
     # ==========================================================================
     # Gemini API Configuration
