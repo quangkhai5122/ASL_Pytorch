@@ -81,6 +81,50 @@ const FINGER_COLORS: string[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// RichFrameData — format returned by /dictionary/{word}/skeleton
+// ---------------------------------------------------------------------------
+
+export interface RichFrameData {
+  frame:      number;
+  lips:       number[][];   // (40, 2)
+  oval:       number[][];   // (36, 2)
+  eyebrows:   number[][];   // (10, 2)
+  eyes:       number[][];   // (16, 2)
+  left_hand:  number[][];   // (21, 2)
+  pose:       number[][];   // ( 9, 2)
+  right_hand: number[][];   // (21, 2)
+  hand_valid?: { left: boolean; right: boolean };
+}
+
+/**
+ * Convert a RichFrameData → 153-point Frame (each point [x, y, 0]).
+ * Layout (mirrors slp_config.py):
+ *   [0:40]    lips
+ *   [40:76]   oval
+ *   [76:86]   eyebrows
+ *   [86:102]  eyes
+ *   [102:123] left_hand
+ *   [123:132] pose
+ *   [132:153] right_hand
+ */
+function richToFrame(r: RichFrameData): Frame {
+  const pad = (arr: number[][], n: number): Frame =>
+    Array.from({ length: n }, (_, i) => {
+      const p = arr?.[i];
+      return p ? [p[0], p[1], 0] : [0, 0, 0];
+    });
+  return [
+    ...pad(r.lips, 40),
+    ...pad(r.oval, 36),
+    ...pad(r.eyebrows, 10),
+    ...pad(r.eyes, 16),
+    ...pad(r.left_hand, 21),
+    ...pad(r.pose, 9),
+    ...pad(r.right_hand, 21),
+  ];
+}
+
+// ---------------------------------------------------------------------------
 // Drawing helpers
 // ---------------------------------------------------------------------------
 
@@ -215,13 +259,24 @@ export interface SkeletonCanvasHandle {
 // ---------------------------------------------------------------------------
 
 export interface SkeletonCanvasProps {
-  frames: number[][][];   // (T, 153, 3)
+  // ── Mode A: Text2Sign — raw (T, 153, 3) ──────────────────────
+  frames?: number[][][];
+
+  // ── Mode B: Dictionary — segmented RichFrameData[] ──────────
+  framesData?: RichFrameData[];
+
   fps?: number;
   playing?: boolean;
+  isPlaying?: boolean;       // alias for Dictionary mode
   speed?: number;
+  playbackSpeed?: number;    // alias for Dictionary mode
   loop?: boolean;
   onFrameChange?: (frame: number, total: number) => void;
+  onFrameUpdate?: (frame: number) => void;  // alias for Dictionary mode
   onPlayEnd?: () => void;
+
+  // Dictionary mode passes currentFrame externally (controlled)
+  currentFrame?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,9 +285,30 @@ export interface SkeletonCanvasProps {
 
 export const SkeletonCanvas = forwardRef<SkeletonCanvasHandle, SkeletonCanvasProps>(
   function SkeletonCanvas(
-    { frames, fps = 25, playing = false, speed = 1, loop = true, onFrameChange, onPlayEnd },
+    {
+      frames: rawFrames,
+      framesData,
+      fps = 25,
+      playing: playingProp,
+      isPlaying,
+      speed: speedProp,
+      playbackSpeed,
+      loop = true,
+      onFrameChange,
+      onFrameUpdate,
+      onPlayEnd,
+      currentFrame: controlledFrame,
+    },
     ref
   ) {
+    // Normalise dual-mode props
+    const playing = playingProp ?? isPlaying ?? false;
+    const speed   = speedProp   ?? playbackSpeed ?? 1;
+
+    // Build unified frames array from whichever source was provided
+    const frames: Frame[] = framesData
+      ? framesData.map(richToFrame)
+      : (rawFrames ?? []) as Frame[];
     const canvasRef    = useRef<HTMLCanvasElement>(null);
     const frameIdxRef  = useRef(0);
     const rafRef       = useRef<number | null>(null);
@@ -293,6 +369,7 @@ export const SkeletonCanvas = forwardRef<SkeletonCanvasHandle, SkeletonCanvasPro
           const idx = frameIdxRef.current;
           renderFrame(idx);
           onFrameChange?.(idx, totalFrames);
+          onFrameUpdate?.(idx);  // Dictionary alias
           forceRender(n => n + 1);
 
           let next = idx + 1;
@@ -309,6 +386,16 @@ export const SkeletonCanvas = forwardRef<SkeletonCanvasHandle, SkeletonCanvasPro
       rafRef.current = requestAnimationFrame(tick);
       return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
     }, [playing, fps, speed, totalFrames, loop, renderFrame, onFrameChange, onPlayEnd]);
+
+    // ── Controlled frame (Dictionary mode) ──────────────
+    useEffect(() => {
+      if (controlledFrame !== undefined && !playing) {
+        const clamped = Math.max(0, Math.min(controlledFrame, frames.length - 1));
+        frameIdxRef.current = clamped;
+        renderFrame(clamped);
+        forceRender(n => n + 1);
+      }
+    }, [controlledFrame, playing, frames.length, renderFrame]);
 
     // ── Render when paused & seeked ──────────────────────
     useEffect(() => {
