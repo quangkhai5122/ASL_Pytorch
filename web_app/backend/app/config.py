@@ -9,6 +9,9 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+APP_DIR = os.path.dirname(__file__)
+BACKEND_DIR = os.path.abspath(os.path.join(APP_DIR, ".."))
+
 
 class Settings(BaseSettings):
     """
@@ -43,7 +46,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Model Configuration
     # ==========================================================================
-    MODEL_PATH: str = os.path.join(os.path.dirname(__file__), "../../../models/model_best_full_training.pth")
+    MODEL_PATH: str = os.path.join(APP_DIR, "../../../models/model_best_full_training.pth")
     DEVICE: str = "auto"  # Options: auto, cuda, cpu
     NUM_CLASSES: int = 250
     INPUT_SIZE: int = 64
@@ -69,7 +72,8 @@ class Settings(BaseSettings):
     # ==========================================================================
     ENABLE_GEMINI: bool = True
     GEMINI_API_KEY: Optional[str] = None
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    GOOGLE_API_KEY: Optional[str] = None
+    GEMINI_MODEL: str = "gemini-3.1-flash-lite"
 
     # ==========================================================================
     # AWS S3 Configuration (Optional)
@@ -140,7 +144,7 @@ class Settings(BaseSettings):
     class Config:
         """Pydantic config for settings."""
 
-        env_file = ".env"
+        env_file = (os.path.join(BACKEND_DIR, ".env"), ".env")
         case_sensitive = True
 
 

@@ -18,6 +18,8 @@ class GeminiService:
     _instance: Optional["GeminiService"] = None
     _enabled = False
     _initialized = False
+    _model = None
+    _last_error: Optional[str] = None
 
     def __new__(cls) -> "GeminiService":
         """Ensure singleton instantiation."""
@@ -33,21 +35,27 @@ class GeminiService:
     def _initialize(self):
         """Initialize and configure Gemini API."""
         self._initialized = True
+        self._last_error = None
 
         if not settings.ENABLE_GEMINI:
-            print("[INFO] Gemini service disabled (ENABLE_GEMINI=false)")
+            self._last_error = "Gemini service disabled (ENABLE_GEMINI=false)"
+            print(f"[INFO] {self._last_error}")
             return
 
-        if not settings.GEMINI_API_KEY:
-            print("[WARN] Gemini API key not found, service disabled")
+        api_key = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
+        if not api_key:
+            self._last_error = "Gemini API key not found; set GEMINI_API_KEY or GOOGLE_API_KEY"
+            print(f"[WARN] {self._last_error}")
             return
 
         try:
-            genai.configure(api_key=settings.GEMINI_API_KEY)
+            genai.configure(api_key=api_key)
+            self._model = genai.GenerativeModel(settings.GEMINI_MODEL)
             self._enabled = True
             print(f"[OK] Gemini service initialized with model: {settings.GEMINI_MODEL}")
         except Exception as e:
-            print(f"[WARN] Failed to initialize Gemini: {str(e)}")
+            self._last_error = f"Failed to initialize Gemini: {str(e)}"
+            print(f"[WARN] {self._last_error}")
             self._enabled = False
 
     def generate_sentence(self, signs: List[str]) -> Optional[str]:
@@ -65,9 +73,11 @@ class GeminiService:
             Generated sentence or None if generation fails
         """
         if not self._enabled:
+            self._last_error = self._last_error or "Gemini service is not enabled"
             return None
 
         if not signs:
+            self._last_error = "No signs provided"
             return None
 
         try:
@@ -85,9 +95,7 @@ class GeminiService:
             Output:
             """
 
-            # Get model and generate
-            model = genai.GenerativeModel(settings.GEMINI_MODEL)
-            response = model.generate_content(
+            response = self._model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
                     max_output_tokens=100,
@@ -98,20 +106,25 @@ class GeminiService:
             if getattr(response, 'text', None):
                 sentence = response.text.strip()
                 print(f"[OK] Generated sentence: {sentence}")
+                self._last_error = None
                 return sentence
 
-            # Fallback if empty response
-            fallback = " ".join(signs)
-            print(f"[WARN] Empty Gemini response, using fallback: {fallback}")
-            return fallback
+            self._last_error = "Empty Gemini response"
+            print(f"[WARN] {self._last_error}")
+            return None
 
         except Exception as e:
-            print(f"[WARN] Gemini generation failed: {str(e)}")
+            self._last_error = f"Gemini generation failed: {str(e)}"
+            print(f"[WARN] {self._last_error}")
             return None
 
     def is_enabled(self) -> bool:
         """Check if Gemini service is enabled and initialized."""
         return self._enabled
+
+    def last_error(self) -> Optional[str]:
+        """Return the last initialization/generation error for diagnostics."""
+        return self._last_error
 
     def validate_signs(self, signs: List[str]) -> bool:
         """

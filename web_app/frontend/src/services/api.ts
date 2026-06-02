@@ -92,6 +92,8 @@ export interface WebSocketHealthResponse {
 export interface GenerateSentenceResponse {
   sentence: string;
   signs: string[];
+  method: 'gemini' | 'fallback';
+  detail?: string | null;
 }
 
 // API Client Class

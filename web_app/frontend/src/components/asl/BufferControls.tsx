@@ -16,6 +16,9 @@ export function BufferControls() {
     try {
       const response = await apiClient.generateSentence(buffer.map((token) => token.gloss));
       setGeneratedSentence(response.sentence);
+      if (response.method === "fallback") {
+        setError(response.detail ? `${response.detail}. Using local sentence generation.` : "Using local sentence generation.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sentence generation failed");
     } finally {

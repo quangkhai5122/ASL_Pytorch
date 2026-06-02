@@ -299,13 +299,64 @@ async def predict_video(
                 pass
 
 
+def _normalize_sign(sign: str) -> str:
+    return sign.strip().lower().replace("_", " ").replace("-", " ")
+
+
 def _fallback_sentence(signs: list) -> str:
-    """Simple fallback: join signs into readable sentence."""
-    words = [s.lower().replace("_", " ") for s in signs if s]
+    """Rule-based fallback for common ASL gloss sequences."""
+    words = [_normalize_sign(s) for s in signs if s and _normalize_sign(s) != "tv"]
     if not words:
         return ""
-    sentence = " ".join(words)
+
+    pronouns = {
+        "i": "I",
+        "me": "I",
+        "my": "my",
+        "you": "you",
+        "your": "your",
+        "he": "he",
+        "she": "she",
+        "we": "we",
+        "they": "they",
+    }
+    wh_words = {"what", "where", "when", "why", "who", "how"}
+    verbs = {
+        "want", "need", "like", "love", "go", "come", "eat", "drink", "help",
+        "have", "see", "meet", "learn", "work", "play", "move", "give", "make",
+    }
+
+    # Common ASL topic-comment order: NAME YOU -> What is your name?
+    if len(words) == 2 and words[0] == "name" and words[1] in {"you", "your"}:
+        return "What is your name?"
+
+    if words[0] in wh_words:
+        sentence = " ".join(words)
+        return sentence[0].upper() + sentence[1:] + "?"
+
+    normalized = [pronouns.get(word, word) for word in words]
+    if normalized[0].lower() in verbs:
+        normalized.insert(0, "I")
+
+    sentence = " ".join(normalized)
     return sentence[0].upper() + sentence[1:] + "."
+
+
+def _public_gemini_error(error: str | None) -> str | None:
+    """Return a short user-facing Gemini error without raw provider details."""
+    if not error:
+        return None
+
+    lower = error.lower()
+    if "prepayment credits are depleted" in lower:
+        return "Gemini credits are depleted"
+    if "quota" in lower or "429" in lower:
+        return "Gemini quota exceeded"
+    if "api key" in lower:
+        return "Gemini API key is missing or invalid"
+    if "empty gemini response" in lower:
+        return "Gemini returned an empty response"
+    return "Gemini generation failed"
 
 
 @router.post("/generate-sentence")
@@ -316,7 +367,7 @@ async def generate_sentence(
 ):
     """
     Generate a natural language sentence from a list of recognized signs.
-    Falls back to simple concatenation if Gemini is unavailable or quota exceeded.
+    Falls back to local grammar rules if Gemini is unavailable or quota exceeded.
     """
     if not request.signs:
         raise HTTPException(
@@ -325,22 +376,30 @@ async def generate_sentence(
         )
 
     sentence = None
+    method = "fallback"
+    detail = None
 
     # Try Gemini first
     if gemini_service.is_enabled():
         try:
             sentence = gemini_service.generate_sentence(request.signs)
+            if sentence:
+                method = "gemini"
         except Exception as e:
             print(f"[GenerateSentence] Gemini failed: {e}")
+            detail = str(e)
+    else:
+        detail = getattr(gemini_service, "last_error", lambda: None)()
 
-    # Fallback: simple join
+    # Fallback: local grammar rules
     if not sentence:
         sentence = _fallback_sentence(request.signs)
         print(f"[GenerateSentence] Using fallback: {sentence}")
+        detail = detail or getattr(gemini_service, "last_error", lambda: None)()
 
     return {
         "sentence": sentence,
         "signs": request.signs,
-        "method": "gemini" if sentence and gemini_service.is_enabled() else "fallback"
+        "method": method,
+        "detail": _public_gemini_error(detail),
     }
-

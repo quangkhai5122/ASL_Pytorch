@@ -197,9 +197,9 @@ class TranslateService:
             print("[INFO] TranslateService: Gemini disabled (ENABLE_GEMINI=false)")
             return
 
-        api_key = settings.GEMINI_API_KEY
+        api_key = settings.GEMINI_API_KEY or settings.GOOGLE_API_KEY
         if not api_key:
-            print("[WARN] TranslateService: GEMINI_API_KEY not set — using fallback")
+            print("[WARN] TranslateService: GEMINI_API_KEY/GOOGLE_API_KEY not set — using fallback")
             return
 
         try:

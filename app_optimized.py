@@ -608,12 +608,13 @@ class ASLAppOptimized:
 
         # 4) Gemini
         self.gemini_model = None
-        GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-        if GOOGLE_API_KEY:
+        google_api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+        if google_api_key:
             try:
-                genai.configure(api_key=GOOGLE_API_KEY)
-                self.gemini_model = genai.GenerativeModel('gemini-2.5-flash-lite')
-                print("Gemini API (2.5 Flash Lite) Initialized.")
+                genai.configure(api_key=google_api_key)
+                gemini_model_name = os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite")
+                self.gemini_model = genai.GenerativeModel(gemini_model_name)
+                print(f"Gemini API ({gemini_model_name}) Initialized.")
             except Exception as e:
                 print(f"Warning: Could not initialize Gemini API: {e}")
                 import traceback
